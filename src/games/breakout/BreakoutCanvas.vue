@@ -1,7 +1,16 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
-import { defaultConfig, createInitialState, resetGame, setPaddleByMouse, setPaddleDir, startGame, step, togglePause } from './breakout'
+import {
+  createInitialState,
+  defaultConfig,
+  resetGame,
+  setPaddleByMouse,
+  setPaddleDir,
+  startGame,
+  step,
+  togglePause
+} from './breakout'
 import { render } from './render'
 import type { BreakoutConfig, GameStatus } from './types'
 
@@ -10,7 +19,11 @@ const status = ref<GameStatus>('ready')
 const score = ref(0)
 const lives = ref(cfg.value.lives)
 
+const wrapperRef = ref<HTMLDivElement | null>(null)
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+
+const isFullscreen = ref(false)
+const canFullscreen = computed(() => typeof document !== 'undefined' && !!document.documentElement.requestFullscreen)
 
 let raf = 0
 let lastTs = 0
@@ -26,7 +39,7 @@ function resizeCanvas() {
   const canvas = canvasRef.value
   if (!canvas) return
 
-  // Fixed game resolution; scale via CSS for crispness.
+  // Fixed internal resolution; scaled by CSS.
   canvas.width = cfg.value.width
   canvas.height = cfg.value.height
 
@@ -74,12 +87,7 @@ function onStart() {
 function onPauseToggle() {
   togglePause(state)
   syncRefs()
-  if (state.status === 'paused') {
-    // keep RAF running to render overlay, but stop physics by state machine
-    ensureLoopRunning()
-  } else if (state.status === 'playing') {
-    ensureLoopRunning()
-  }
+  ensureLoopRunning()
 }
 
 function onRestart() {
@@ -108,13 +116,53 @@ function onKeyUp(e: KeyboardEvent) {
   if (e.key === 'ArrowRight' && state.paddleDir === 1) setPaddleDir(state, 0)
 }
 
-function onMouseMove(e: MouseEvent) {
+function setPaddleFromClientX(clientX: number) {
   const canvas = canvasRef.value
   if (!canvas) return
   const rect = canvas.getBoundingClientRect()
-  const x = e.clientX - rect.left
-
+  const x = clientX - rect.left
   setPaddleByMouse(cfg.value, state, (x / rect.width) * cfg.value.width)
+}
+
+function onPointerMove(e: PointerEvent) {
+  // Works for mouse + touch + pen
+  setPaddleFromClientX(e.clientX)
+}
+
+function onTouchMove(e: TouchEvent) {
+  // iOS sometimes prefers touch events for scrolling contexts
+  const t = e.touches.item(0)
+  if (!t) return
+  setPaddleFromClientX(t.clientX)
+}
+
+function onPressLeft(down: boolean) {
+  setPaddleDir(state, down ? -1 : 0)
+}
+
+function onPressRight(down: boolean) {
+  setPaddleDir(state, down ? 1 : 0)
+}
+
+async function toggleFullscreen() {
+  const el = wrapperRef.value
+  if (!el) return
+
+  try {
+    if (!document.fullscreenElement) {
+      await el.requestFullscreen()
+    } else {
+      await document.exitFullscreen()
+    }
+  } catch {
+    // Some mobile browsers block fullscreen; ignore silently.
+  }
+}
+
+function onFullscreenChange() {
+  isFullscreen.value = !!document.fullscreenElement
+  // redraw after layout change
+  resizeCanvas()
 }
 
 onMounted(() => {
@@ -124,30 +172,32 @@ onMounted(() => {
 
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('keyup', onKeyUp)
+  document.addEventListener('fullscreenchange', onFullscreenChange)
+
+  const onResize = () => resizeCanvas()
+  window.addEventListener('resize', onResize)
+
+  onBeforeUnmount(() => {
+    window.removeEventListener('resize', onResize)
+  })
 })
 
 onBeforeUnmount(() => {
   stopLoop()
   window.removeEventListener('keydown', onKeyDown)
   window.removeEventListener('keyup', onKeyUp)
-})
-
-onMounted(() => {
-  // If the user changes window size, canvas should keep same internal resolution.
-  // We only re-render to be safe.
-  const onResize = () => resizeCanvas()
-  window.addEventListener('resize', onResize)
-  onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+  document.removeEventListener('fullscreenchange', onFullscreenChange)
 })
 </script>
 
 <template>
-  <div class="d-flex flex-column align-center">
+  <div ref="wrapperRef" class="d-flex flex-column align-center breakout-wrapper" :class="{ fullscreen: isFullscreen }">
     <canvas
       ref="canvasRef"
       class="breakout-canvas"
       tabindex="0"
-      @mousemove="onMouseMove"
+      @pointermove="onPointerMove"
+      @touchmove.prevent="onTouchMove"
     />
 
     <div class="mt-4 d-flex ga-2 flex-wrap justify-center">
@@ -157,27 +207,79 @@ onMounted(() => {
     </div>
 
     <div class="mt-4 d-flex ga-2 flex-wrap justify-center">
-      <v-btn color="primary" @click="onStart" :disabled="status === 'playing'">
-        Start
-      </v-btn>
-      <v-btn color="secondary" @click="onPauseToggle" :disabled="status === 'ready' || status === 'gameover' || status === 'cleared'">
+      <v-btn color="primary" @click="onStart" :disabled="status === 'playing'">Start</v-btn>
+      <v-btn
+        color="secondary"
+        @click="onPauseToggle"
+        :disabled="status === 'ready' || status === 'gameover' || status === 'cleared'"
+      >
         {{ status === 'paused' ? 'Resume' : 'Pause' }}
       </v-btn>
       <v-btn variant="tonal" @click="onRestart">Restart</v-btn>
+
+      <v-btn
+        v-if="canFullscreen"
+        variant="outlined"
+        @click="toggleFullscreen"
+      >
+        {{ isFullscreen ? 'Exit Fullscreen' : 'Fullscreen' }}
+      </v-btn>
     </div>
 
-    <p class="text-caption text-medium-emphasis mt-4 text-center" style="max-width: 640px;">
-      Controls: Mouse move / ← → to move paddle · Space to Start/Pause · R to Restart
+    <!-- Mobile-friendly on-screen controls -->
+    <div class="mt-4 d-flex ga-3 justify-center d-sm-none">
+      <v-btn
+        icon="mdi-chevron-left"
+        size="x-large"
+        color="primary"
+        variant="tonal"
+        @pointerdown.prevent="onPressLeft(true)"
+        @pointerup.prevent="onPressLeft(false)"
+        @pointercancel.prevent="onPressLeft(false)"
+        @pointerleave.prevent="onPressLeft(false)"
+      />
+      <v-btn
+        icon="mdi-chevron-right"
+        size="x-large"
+        color="primary"
+        variant="tonal"
+        @pointerdown.prevent="onPressRight(true)"
+        @pointerup.prevent="onPressRight(false)"
+        @pointercancel.prevent="onPressRight(false)"
+        @pointerleave.prevent="onPressRight(false)"
+      />
+    </div>
+
+    <p class="text-caption text-medium-emphasis mt-4 text-center" style="max-width: 720px;">
+      Mobile: drag on canvas or use ◀ ▶ buttons · Desktop: mouse move / ← → · Space Start/Pause · R Restart
     </p>
   </div>
 </template>
 
 <style scoped>
+.breakout-wrapper {
+  width: 100%;
+}
+
 .breakout-canvas {
   width: min(100%, 640px);
   aspect-ratio: 640 / 480;
   border-radius: 14px;
   outline: none;
   background: rgba(255, 255, 255, 0.04);
+  touch-action: none; /* prevent scroll/zoom while dragging */
+}
+
+.breakout-wrapper.fullscreen {
+  width: 100vw;
+  height: 100vh;
+  padding: 12px;
+  justify-content: center;
+}
+
+.breakout-wrapper.fullscreen .breakout-canvas {
+  width: min(100vw, calc(100vh * (640 / 480)));
+  height: auto;
+  border-radius: 0;
 }
 </style>
