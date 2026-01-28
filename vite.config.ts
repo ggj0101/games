@@ -6,6 +6,8 @@ import vuetify from 'vite-plugin-vuetify'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // GitHub Pages project site: https://ggj0101.github.io/games/
+  base: '/games/',
   plugins: [
     vue(),
     vuetify({ autoImport: true })
