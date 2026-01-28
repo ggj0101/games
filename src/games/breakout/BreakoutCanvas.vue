@@ -25,6 +25,10 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isFullscreen = ref(false)
 const canFullscreen = computed(() => typeof document !== 'undefined' && !!document.documentElement.requestFullscreen)
 
+// Mobile UX
+const showLandscapeHint = ref(false)
+const isLandscape = ref(false)
+
 let raf = 0
 let lastTs = 0
 let state = createInitialState(cfg.value)
@@ -144,6 +148,40 @@ function onPressRight(down: boolean) {
   setPaddleDir(state, down ? 1 : 0)
 }
 
+// Virtual joystick (mobile)
+const joyActive = ref(false)
+const joyDx = ref(0) // -1..1
+const joyEl = ref<HTMLDivElement | null>(null)
+
+function joyStart(e: PointerEvent) {
+  joyActive.value = true
+  ;(e.currentTarget as HTMLElement)?.setPointerCapture?.(e.pointerId)
+  joyMove(e)
+}
+
+function joyMove(e: PointerEvent) {
+  if (!joyActive.value) return
+  const el = joyEl.value
+  if (!el) return
+
+  const r = el.getBoundingClientRect()
+  const cx = r.left + r.width / 2
+  const dx = (e.clientX - cx) / (r.width / 2)
+  joyDx.value = Math.max(-1, Math.min(1, dx))
+
+  // map to discrete direction with a deadzone
+  const dead = 0.25
+  if (joyDx.value < -dead) setPaddleDir(state, -1)
+  else if (joyDx.value > dead) setPaddleDir(state, 1)
+  else setPaddleDir(state, 0)
+}
+
+function joyEnd() {
+  joyActive.value = false
+  joyDx.value = 0
+  setPaddleDir(state, 0)
+}
+
 async function toggleFullscreen() {
   const el = wrapperRef.value
   if (!el) return
@@ -165,6 +203,16 @@ function onFullscreenChange() {
   resizeCanvas()
 }
 
+function updateOrientation() {
+  // Prefer matchMedia where available
+  const m = window.matchMedia?.('(orientation: landscape)')
+  isLandscape.value = m ? m.matches : window.innerWidth > window.innerHeight
+
+  // Hint: on small screens, recommend landscape + fullscreen
+  const small = Math.min(window.innerWidth, window.innerHeight) < 700
+  showLandscapeHint.value = small && !isLandscape.value
+}
+
 onMounted(() => {
   resizeCanvas()
   syncRefs()
@@ -174,11 +222,22 @@ onMounted(() => {
   window.addEventListener('keyup', onKeyUp)
   document.addEventListener('fullscreenchange', onFullscreenChange)
 
-  const onResize = () => resizeCanvas()
+  const onResize = () => {
+    resizeCanvas()
+    updateOrientation()
+  }
+
+  const onOrientation = () => {
+    updateOrientation()
+  }
+
   window.addEventListener('resize', onResize)
+  window.addEventListener('orientationchange', onOrientation)
+  updateOrientation()
 
   onBeforeUnmount(() => {
     window.removeEventListener('resize', onResize)
+    window.removeEventListener('orientationchange', onOrientation)
   })
 })
 
@@ -226,6 +285,17 @@ onBeforeUnmount(() => {
       </v-btn>
     </div>
 
+    <!-- Landscape hint (mobile) -->
+    <v-alert
+      v-if="showLandscapeHint"
+      class="mt-4 d-sm-none"
+      type="info"
+      variant="tonal"
+      title="建議橫向遊玩"
+    >
+      手機橫向更好操作。切到橫向後可按 Fullscreen 進全螢幕。
+    </v-alert>
+
     <!-- Mobile-friendly on-screen controls -->
     <div class="mt-4 d-flex ga-3 justify-center d-sm-none">
       <v-btn
@@ -238,6 +308,23 @@ onBeforeUnmount(() => {
         @pointercancel.prevent="onPressLeft(false)"
         @pointerleave.prevent="onPressLeft(false)"
       />
+
+      <!-- Virtual joystick -->
+      <div
+        ref="joyEl"
+        class="joy"
+        @pointerdown.prevent="joyStart"
+        @pointermove.prevent="joyMove"
+        @pointerup.prevent="joyEnd"
+        @pointercancel.prevent="joyEnd"
+        @pointerleave.prevent="joyEnd"
+      >
+        <div
+          class="joy-knob"
+          :style="{ transform: `translateX(${joyDx * 26}px)` }"
+        />
+      </div>
+
       <v-btn
         icon="mdi-chevron-right"
         size="x-large"
@@ -251,7 +338,7 @@ onBeforeUnmount(() => {
     </div>
 
     <p class="text-caption text-medium-emphasis mt-4 text-center" style="max-width: 720px;">
-      Mobile: drag on canvas or use ◀ ▶ buttons · Desktop: mouse move / ← → · Space Start/Pause · R Restart
+      Mobile: drag on canvas / use joystick / use ◀ ▶ · Desktop: mouse move / ← → · Space Start/Pause · R Restart
     </p>
   </div>
 </template>
@@ -281,5 +368,28 @@ onBeforeUnmount(() => {
   width: min(100vw, calc(100vh * (640 / 480)));
   height: auto;
   border-radius: 0;
+}
+
+.joy {
+  width: 84px;
+  height: 84px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  position: relative;
+  touch-action: none;
+}
+
+.joy-knob {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: rgba(0, 229, 255, 0.8);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  margin-left: -22px;
+  margin-top: -22px;
 }
 </style>
