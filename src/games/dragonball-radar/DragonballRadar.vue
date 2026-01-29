@@ -150,6 +150,32 @@ const mapRotationDeg = ref<number>(0)
 // - dynamic: arrows indicate angles (depending on mode)
 const lockArrowsTop = ref<boolean>(true)
 
+// Opacity controls (persisted)
+const MAP_OPACITY_KEY = 'dragonballRadar.mapOpacity.v1'
+const HUD_OPACITY_KEY = 'dragonballRadar.hudOpacity.v1'
+const mapOpacity = ref<number>(1)
+const hudOpacity = ref<number>(0.6)
+
+function loadOpacity() {
+  try {
+    const m = Number(localStorage.getItem(MAP_OPACITY_KEY))
+    if (Number.isFinite(m)) mapOpacity.value = Math.max(0, Math.min(1, m))
+    const h = Number(localStorage.getItem(HUD_OPACITY_KEY))
+    if (Number.isFinite(h)) hudOpacity.value = Math.max(0, Math.min(1, h))
+  } catch {
+    // ignore
+  }
+}
+
+function saveOpacity() {
+  try {
+    localStorage.setItem(MAP_OPACITY_KEY, String(mapOpacity.value))
+    localStorage.setItem(HUD_OPACITY_KEY, String(hudOpacity.value))
+  } catch {
+    // ignore
+  }
+}
+
 // --- Device heading (compass) ---
 // Goal: radar "up" is always the phone's forward direction.
 const headingDeg = ref<number | null>(null)
@@ -598,6 +624,7 @@ function drawFrame(tMs: number) {
 
 onMounted(() => {
   loadFound()
+  loadOpacity()
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
 
@@ -646,11 +673,11 @@ onBeforeUnmount(() => {
           <div
             class="radar-stack"
             :class="{ 'heading-up': alignMode === 'heading-up' }"
-            :style="
-              alignMode === 'heading-up'
-                ? { transform: `rotate(${mapRotationDeg}deg)` }
-                : undefined
-            "
+            :style="{
+              ...(alignMode === 'heading-up' ? { transform: `rotate(${mapRotationDeg}deg)` } : {}),
+              '--map-opacity': String(mapOpacity),
+              '--hud-opacity': String(hudOpacity)
+            }"
           >
             <iframe
               class="map-iframe"
@@ -669,12 +696,37 @@ onBeforeUnmount(() => {
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位(手機): {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
         <v-chip v-if="courseDeg != null" variant="tonal">方位(行進): {{ Math.round(courseDeg) }}°</v-chip>
-        <!-- offset removed -->
 
         <v-chip v-if="userPos" variant="tonal">
           目前座標: {{ userPos.lat.toFixed(6) }}, {{ userPos.lng.toFixed(6) }}
         </v-chip>
       </div>
+
+      <v-card variant="tonal" rounded="lg" class="mt-3 pa-3">
+        <div class="text-subtitle-2 font-weight-bold mb-2">透明度</div>
+
+        <div class="text-caption text-medium-emphasis">Google Maps：{{ Math.round(mapOpacity * 100) }}%</div>
+        <v-slider
+          v-model="mapOpacity"
+          :min="0"
+          :max="1"
+          :step="0.05"
+          thumb-label
+          class="mt-1"
+          @end="saveOpacity"
+        />
+
+        <div class="text-caption text-medium-emphasis">Canvas：{{ Math.round(hudOpacity * 100) }}%</div>
+        <v-slider
+          v-model="hudOpacity"
+          :min="0"
+          :max="1"
+          :step="0.05"
+          thumb-label
+          class="mt-1"
+          @end="saveOpacity"
+        />
+      </v-card>
 
       <div v-if="userPos" class="mt-2 d-flex flex-wrap gap-2">
         <v-btn
