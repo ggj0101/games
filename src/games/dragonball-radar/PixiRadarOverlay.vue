@@ -192,49 +192,99 @@ onMounted(async () => {
 
   let rCache = layout().r
 
-  // Update blips
-  function renderBlips() {
-    blipLayer.removeChildren()
+  // --- Blips: keep stable display objects so we can animate pulses.
+  const blipMap = new Map<
+    string,
+    {
+      root: any
+      dot: any
+      ring: any
+      arrow: any
+      baseRadius: number
+      pulseT: number // 0..1
+    }
+  >()
 
+  function getOrCreateBlip(id: string) {
+    const existing = blipMap.get(id)
+    if (existing) return existing
+
+    const root = new PIXI.Container()
+    const dot = new PIXI.Graphics()
+    const ring = new PIXI.Graphics()
+    const arrow = new PIXI.Graphics()
+    root.addChild(ring)
+    root.addChild(arrow)
+    root.addChild(dot)
+
+    const rec = { root, dot, ring, arrow, baseRadius: 5, pulseT: 0 }
+    blipMap.set(id, rec)
+    blipLayer.addChild(root)
+    return rec
+  }
+
+  function removeMissingBlips(ids: Set<string>) {
+    for (const [id, rec] of blipMap) {
+      if (!ids.has(id)) {
+        rec.root.destroy({ children: true })
+        blipMap.delete(id)
+      }
+    }
+  }
+
+  function renderBlips() {
     const r = rCache
 
+    const ids = new Set<string>()
+
     for (const b of props.blips) {
+      ids.add(b.id)
+
+      const rec = getOrCreateBlip(b.id)
+
       const x = Math.max(-1, Math.min(1, b.nx)) * r
       const y = Math.max(-1, Math.min(1, b.ny)) * r
 
-      const g = new PIXI.Graphics()
-      const baseAlpha = b.isFound ? 0.35 : 0.9
+      rec.root.position.set(x, y)
 
+      // visuals
+      const baseAlpha = b.isFound ? 0.25 : 0.9
       const c = b.isFound ? 0x3cffaa : Number.parseInt(b.color.replace('#', ''), 16)
 
-      g.circle(x, y, b.isFound ? 4 : 5).fill({ color: c, alpha: baseAlpha })
+      rec.baseRadius = b.isFound ? 4 : 5
 
-      // pulse ring (unfound)
+      rec.dot.clear()
+      rec.dot.circle(0, 0, rec.baseRadius).fill({ color: c, alpha: baseAlpha })
+
+      rec.ring.clear()
       if (!b.isFound) {
-        g.setStrokeStyle({ width: 2, color: c, alpha: 0.45 })
-        g.circle(x, y, 11).stroke()
+        rec.ring.setStrokeStyle({ width: 2, color: c, alpha: 0.35 })
+        rec.ring.circle(0, 0, 11).stroke()
       }
 
-      // edge arrow for clamped
+      rec.arrow.clear()
       if (b.isClamped) {
-        const ang = Math.atan2(y, x)
-        const ax = Math.cos(ang) * (r - 6)
-        const ay = Math.sin(ang) * (r - 6)
+        // Draw arrow at edge direction; since root is at clamped position, arrow should point outward.
+        const ang = Math.atan2(b.ny, b.nx)
         const s = 10
-        const a = new PIXI.Graphics()
-        a.poly([
-          ax,
-          ay,
-          ax - Math.cos(ang - 0.55) * s,
-          ay - Math.sin(ang - 0.55) * s,
-          ax - Math.cos(ang + 0.55) * s,
-          ay - Math.sin(ang + 0.55) * s
-        ]).fill({ color: c, alpha: 0.6 })
-        blipLayer.addChild(a)
+        const ax = Math.cos(ang) * 0
+        const ay = Math.sin(ang) * 0
+        rec.arrow
+          .poly([
+            ax,
+            ay,
+            ax - Math.cos(ang - 0.55) * s,
+            ay - Math.sin(ang - 0.55) * s,
+            ax - Math.cos(ang + 0.55) * s,
+            ay - Math.sin(ang + 0.55) * s
+          ])
+          .fill({ color: c, alpha: 0.55 })
       }
 
-      blipLayer.addChild(g)
+      rec.root.alpha = 1
     }
+
+    removeMissingBlips(ids)
   }
 
   watch(
@@ -253,14 +303,44 @@ onMounted(async () => {
   }
   window.addEventListener('resize', onResize)
 
+  // --- Beep (WebAudio) ---
+  let audioCtx: AudioContext | null = null
+  function beep() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      if (audioCtx.state === 'suspended') audioCtx.resume()
+
+      const t0 = audioCtx.currentTime
+      const osc = audioCtx.createOscillator()
+      const gain = audioCtx.createGain()
+
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(880, t0)
+
+      gain.gain.setValueAtTime(0.0001, t0)
+      gain.gain.exponentialRampToValueAtTime(0.12, t0 + 0.01)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.09)
+
+      osc.connect(gain)
+      gain.connect(audioCtx.destination)
+
+      osc.start(t0)
+      osc.stop(t0 + 0.1)
+    } catch {
+      // ignore
+    }
+  }
+
   // Animation
   let t0 = performance.now()
+  let lastBeepAt = 0
   app.ticker.add(() => {
     const t = (performance.now() - t0) / 1000
 
     // rotate sweep
     const speed = props.sweepSpeed ?? 0.45
-    sweep.rotation = (t * speed * Math.PI * 2) % (Math.PI * 2)
+    const sweepRot = (t * speed * Math.PI * 2) % (Math.PI * 2)
+    sweep.rotation = sweepRot
 
     // sweep line
     sweepLine.clear()
@@ -268,12 +348,60 @@ onMounted(async () => {
     sweepLine.moveTo(0, 0)
     sweepLine.lineTo(rCache, 0)
     sweepLine.stroke()
-    sweepLine.rotation = sweep.rotation
+    sweepLine.rotation = sweepRot
 
-    // subtle pulse for clamped arrows
-    for (const child of blipLayer.children) {
-      if (child instanceof PIXI.Graphics) continue
-      child.alpha = 0.45 + 0.25 * Math.sin(t * 6)
+    // Find nearest in-range (not clamped, not found)
+    let nearest: RadarBlip | null = null
+    let best = Number.POSITIVE_INFINITY
+    for (const b of props.blips) {
+      if (b.isFound || b.isClamped) continue
+      const d2 = b.nx * b.nx + b.ny * b.ny
+      if (d2 < best) {
+        best = d2
+        nearest = b
+      }
+    }
+
+    // Trigger pulse + beep when sweep passes over nearest target.
+    if (nearest) {
+      // Angle of target in radar coords. sweepRot is 0 along +x.
+      const targetAng = Math.atan2(nearest.ny, nearest.nx)
+      let diff = ((targetAng - sweepRot + Math.PI) % (Math.PI * 2)) - Math.PI
+      diff = Math.abs(diff)
+
+      const inWindow = diff < 0.14
+      const now = performance.now() / 1000
+
+      if (inWindow && now - lastBeepAt > 0.7) {
+        lastBeepAt = now
+        const rec = blipMap.get(nearest.id)
+        if (rec) rec.pulseT = 1
+        beep()
+      }
+    }
+
+    // Animate pulses
+    for (const rec of blipMap.values()) {
+      if (rec.pulseT > 0) {
+        // ease-out pulse: 1 -> 0
+        rec.pulseT = Math.max(0, rec.pulseT - 0.06)
+        const k = rec.pulseT
+        const s = 1 + 0.7 * Math.sin((1 - k) * Math.PI) * k
+        rec.dot.scale.set(s)
+        rec.ring.scale.set(1 + 0.6 * (1 - k))
+        rec.ring.alpha = 0.35 + 0.35 * k
+      } else {
+        rec.dot.scale.set(1)
+        rec.ring.scale.set(1)
+      }
+    }
+
+    // subtle blink for clamped arrows
+    const blink = 0.55 + 0.25 * Math.sin(t * 6)
+    for (const rec of blipMap.values()) {
+      if (rec.arrow.geometry && rec.arrow.geometry.graphicsData?.length) {
+        rec.arrow.alpha = blink
+      }
     }
   })
 
