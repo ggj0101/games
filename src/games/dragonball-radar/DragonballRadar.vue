@@ -14,7 +14,7 @@ const targets: Target[] = [
   { name: '新竹市香山綜合運動場', kind: 'dragonball', lat: 24.797, lng: 120.949 }
 ]
 
-const successRadiusMeters = 30
+const successRadiusMeters = 50
 
 const LS_KEY = 'dragonballRadar.found.v1'
 
@@ -140,10 +140,15 @@ function updateScreenAngle() {
   screenAngleDeg.value = 0
 }
 
+// Empirical offset: some browsers report heading axis rotated by 90°.
+// Positive means rotate clockwise.
+const headingOffsetDeg = 90
+
 const effectiveHeadingDeg = computed(() => {
   if (headingDeg.value == null) return null
   // Compensate screen rotation (portrait/landscape) so "up" stays phone-forward.
-  return normalizeDeg(headingDeg.value - screenAngleDeg.value)
+  // Also apply an offset to align axes across devices.
+  return normalizeDeg(headingDeg.value - screenAngleDeg.value + headingOffsetDeg)
 })
 
 function computeHeadingFromEvent(e: DeviceOrientationEvent) {
