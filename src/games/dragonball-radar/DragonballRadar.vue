@@ -142,6 +142,9 @@ const watchId = ref<number | null>(null)
 // - heading-up: rotate map+overlay so screen-up = phone forward
 const alignMode = ref<'north-up' | 'heading-up'>('heading-up')
 
+// Smooth DOM rotation so we don't jump at 359° -> 0°.
+const mapRotationDeg = ref<number>(0)
+
 // Arrow mode:
 // - locked: keep arrows at screen top
 // - dynamic: arrows indicate angles (depending on mode)
@@ -595,6 +598,15 @@ function drawFrame(tMs: number) {
 
   ctx.restore()
 
+  // Smooth rotation for map/overlay (DOM) in heading-up mode.
+  // We rotate the whole stack by -heading; smooth with shortest-angle step.
+  if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
+    const target = -effectiveHeadingDeg.value
+    mapRotationDeg.value = mapRotationDeg.value + normalize180(target - mapRotationDeg.value) * 0.25
+  } else {
+    mapRotationDeg.value = 0
+  }
+
   rafId = requestAnimationFrame(drawFrame)
 }
 
@@ -650,8 +662,8 @@ onBeforeUnmount(() => {
             class="radar-stack"
             :class="{ 'heading-up': alignMode === 'heading-up' }"
             :style="
-              alignMode === 'heading-up' && effectiveHeadingDeg != null
-                ? { transform: `rotate(${-effectiveHeadingDeg}deg)` }
+              alignMode === 'heading-up'
+                ? { transform: `rotate(${mapRotationDeg}deg)` }
                 : undefined
             "
           >
@@ -793,7 +805,8 @@ onBeforeUnmount(() => {
   border-radius: 999px;
   overflow: hidden;
   transform-origin: center center;
-  transition: transform 140ms linear;
+  /* rotation is smoothed in JS to avoid 359° -> 0° jump */
+  transition: none;
 }
 
 .map-iframe {
