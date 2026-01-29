@@ -31,13 +31,7 @@ function copyText(text: string) {
   }
 }
 
-function openInBrowser(url: string) {
-  try {
-    window.open(url, '_blank')
-  } catch {
-    // ignore
-  }
-}
+// (removed) openInBrowser: google maps embed disabled.
 
 const status = ref<'idle' | 'watching' | 'denied' | 'error' | 'success'>('idle')
 const errorMsg = ref<string>('')
@@ -136,45 +130,7 @@ const range = computed(() => {
   return { rangeMeters: Math.round(autoRangeMeters), mapZoom: z }
 })
 
-const mapNonce = ref<number>(0)
-const mapLoaded = ref<boolean>(false)
-
-// Stabilize map center/zoom to avoid iframe reloading (flashing) on every GPS tick.
-const mapCenter = ref<LatLng>(targets[0]!)
-const mapZoom = ref<number>(15)
-
-function round(n: number, digits: number) {
-  const k = 10 ** digits
-  return Math.round(n * k) / k
-}
-
-function maybeUpdateMapView() {
-  const center = userPos.value ?? nearest.value?.t
-  if (!center) return
-
-  // Update only when moved enough to matter (reduces reloads)
-  const moved = haversineMeters(mapCenter.value, center)
-  const nextZoom = range.value.mapZoom
-
-  if (moved > 25 || nextZoom !== mapZoom.value) {
-    // Round coords so tiny jitter doesn't trigger changes
-    mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
-    mapZoom.value = nextZoom
-    mapLoaded.value = false
-  }
-}
-
-const mapUrl = computed(() => {
-  // No-key embed.
-  // Use ll=lat,lng to avoid adding a pin marker (q= adds a marker).
-  const cb = mapNonce.value
-  return `https://www.google.com/maps?ll=${mapCenter.value.lat},${mapCenter.value.lng}&z=${mapZoom.value}&output=embed&cb=${cb}`
-})
-
-function reloadMap() {
-  mapLoaded.value = false
-  mapNonce.value += 1
-}
+// Google Maps embed disabled.
 
 // --- Pixi radar overlay data ---
 const radarBlips = computed(() => {
@@ -360,7 +316,7 @@ function startWatch() {
       const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }
       userPos.value = nextPos
       accuracy.value = pos.coords.accuracy ?? null
-      maybeUpdateMapView()
+      // maybeUpdateMapView() removed (google maps disabled)
 
       // Estimate movement direction (course) from last GPS fix.
       if (lastFix.value) {
@@ -425,7 +381,7 @@ let rafId: number | null = null
 onMounted(() => {
   loadFound()
   loadOpacity()
-  maybeUpdateMapView()
+  // maybeUpdateMapView() removed (google maps disabled)
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
 
@@ -466,20 +422,7 @@ onBeforeUnmount(() => {
               '--hud-opacity': String(hudOpacity)
             }"
           >
-            <iframe
-              class="map-iframe"
-              :src="mapUrl"
-              loading="eager"
-              referrerpolicy="no-referrer-when-downgrade"
-              @load="mapLoaded = true"
-            />
-            <div v-if="!mapLoaded" class="map-loading">
-              地圖載入中…
-              <div class="mt-2 d-flex gap-2 justify-center">
-                <v-btn size="small" variant="outlined" @click="reloadMap">重新載入</v-btn>
-                <v-btn size="small" variant="outlined" @click="openInBrowser(mapUrl)">用瀏覽器開地圖</v-btn>
-              </div>
-            </div>
+            <!-- Google Maps layer removed (Embed API restrictions / blank iframe issues) -->
             <PixiRadarOverlay
               :blips="radarBlips"
               :range-meters="range.rangeMeters"
@@ -659,21 +602,7 @@ onBeforeUnmount(() => {
 
 :root {
   /* You can tune these to taste. */
-  --map-opacity: 1;
   --hud-opacity: 0.6;
-}
-
-.map-iframe {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  z-index: 0;
-  opacity: var(--map-opacity);
-  /* Don't steal scroll/drag; radar is a HUD. */
-  pointer-events: none;
-  filter: saturate(1.05) contrast(1.05);
 }
 
 .radar-canvas {
