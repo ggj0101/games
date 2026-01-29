@@ -30,6 +30,14 @@ function copyText(text: string) {
   }
 }
 
+function openInBrowser(url: string) {
+  try {
+    window.open(url, '_blank')
+  } catch {
+    // ignore
+  }
+}
+
 const status = ref<'idle' | 'watching' | 'denied' | 'error' | 'success'>('idle')
 const errorMsg = ref<string>('')
 
@@ -127,13 +135,22 @@ const range = computed(() => {
   return { rangeMeters: Math.round(autoRangeMeters), mapZoom: z }
 })
 
+const mapNonce = ref<number>(0)
+const mapLoaded = ref<boolean>(false)
+
 const mapUrl = computed(() => {
   // No-key embed; center on user if available.
   // Use ll=lat,lng to avoid adding a pin marker (q= adds a marker).
   const z = range.value.mapZoom
   const center = userPos.value ?? nearest.value?.t ?? targets[0]!
-  return `https://www.google.com/maps?ll=${center.lat},${center.lng}&z=${z}&output=embed`
+  const cb = mapNonce.value
+  return `https://www.google.com/maps?ll=${center.lat},${center.lng}&z=${z}&output=embed&cb=${cb}`
 })
+
+function reloadMap() {
+  mapLoaded.value = false
+  mapNonce.value += 1
+}
 
 const watchId = ref<number | null>(null)
 
@@ -682,9 +699,17 @@ onBeforeUnmount(() => {
             <iframe
               class="map-iframe"
               :src="mapUrl"
-              loading="lazy"
+              loading="eager"
               referrerpolicy="no-referrer-when-downgrade"
+              @load="mapLoaded = true"
             />
+            <div v-if="!mapLoaded" class="map-loading">
+              地圖載入中…
+              <div class="mt-2 d-flex gap-2 justify-center">
+                <v-btn size="small" variant="outlined" @click="reloadMap">重新載入</v-btn>
+                <v-btn size="small" variant="outlined" @click="openInBrowser(mapUrl)">用瀏覽器開地圖</v-btn>
+              </div>
+            </div>
             <canvas ref="canvasRef" class="radar-canvas" />
           </div>
         </div>
@@ -841,6 +866,21 @@ onBeforeUnmount(() => {
   transform-origin: center center;
   /* rotation is smoothed in JS to avoid 359° -> 0° jump */
   transition: none;
+}
+
+.map-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 14px;
+  text-align: center;
+  padding: 12px;
 }
 
 :root {
