@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import PixiRadarOverlay from './PixiRadarOverlay.vue'
 
 import type { LatLng } from './geo'
 import { haversineMeters, toLocalMeters } from './geo'
@@ -174,6 +175,27 @@ function reloadMap() {
   mapLoaded.value = false
   mapNonce.value += 1
 }
+
+// --- Pixi radar overlay data ---
+const radarBlips = computed(() => {
+  if (!userPos.value) return []
+  const rangeMeters = range.value.rangeMeters
+
+  return targets.map((t) => {
+    const { dx, dy } = toLocalMeters(userPos.value!, t)
+    const nx = dx / rangeMeters
+    const ny = -dy / rangeMeters
+    return {
+      id: t.name,
+      name: t.name,
+      nx,
+      ny,
+      isClamped: Math.abs(nx) > 1 || Math.abs(ny) > 1,
+      isFound: !!found.value[t.name],
+      color: t.color
+    }
+  })
+})
 
 const watchId = ref<number | null>(null)
 
@@ -397,276 +419,8 @@ function stopWatch() {
   watchId.value = null
 }
 
-// --- Radar canvas ---
-const canvasRef = ref<HTMLCanvasElement | null>(null)
+// Canvas renderer removed (replaced by Pixi overlay).
 let rafId: number | null = null
-
-function drawFrame(tMs: number) {
-  const canvas = canvasRef.value
-  const ctx = canvas?.getContext('2d')
-  if (!canvas || !ctx) return
-
-  const w = canvas.width
-  const h = canvas.height
-  const cx = w / 2
-  const cy = h / 2
-  const r = Math.min(w, h) * 0.46
-
-  // Clear every frame so the HUD doesn't accumulate (transparent background).
-  ctx.clearRect(0, 0, w, h)
-
-  // Radar circles + cross
-  ctx.save()
-  ctx.translate(cx, cy)
-
-  // Smoother lines
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  // (imageSmoothingEnabled mostly affects images, but harmless)
-  ;(ctx as any).imageSmoothingEnabled = true
-
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
-  ctx.lineWidth = 2
-  for (const k of [0.25, 0.5, 0.75, 1]) {
-    ctx.beginPath()
-    ctx.arc(0, 0, r * k, 0, Math.PI * 2)
-    ctx.stroke()
-  }
-
-  ctx.beginPath()
-  ctx.moveTo(-r, 0)
-  ctx.lineTo(r, 0)
-  ctx.moveTo(0, -r)
-  ctx.lineTo(0, r)
-  ctx.stroke()
-
-  // Sweep line
-  const speed = status.value === 'success' ? 0.0 : 0.45 // turns/sec
-  const angle = ((tMs / 1000) * speed * Math.PI * 2) % (Math.PI * 2)
-  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r)
-  grad.addColorStop(0, 'rgba(0,0,0,0.25)')
-  grad.addColorStop(0.65, 'rgba(0,0,0,0.10)')
-  grad.addColorStop(1, 'rgba(0,0,0,0)')
-
-  ctx.rotate(angle)
-  ctx.strokeStyle = 'rgba(0,0,0,0.45)'
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  ctx.moveTo(0, 0)
-  ctx.lineTo(r, 0)
-  ctx.stroke()
-
-  // Sweep wedge glow
-  ctx.fillStyle = grad
-  ctx.beginPath()
-  ctx.moveTo(0, 0)
-  ctx.arc(0, 0, r, -0.16, 0.16)
-  ctx.closePath()
-  ctx.fill()
-
-  // Target blip
-  if (userPos.value) {
-    const rangeMeters = range.value.rangeMeters
-
-    for (const t of targets) {
-      let { dx, dy } = toLocalMeters(userPos.value, t)
-      const d = haversineMeters(userPos.value, t)
-      const isFound = !!found.value[t.name]
-
-      // In map-background mode, keep the radar north-up (same as Google Maps).
-      // Phone heading is shown separately as an arrow marker.
-
-      // Map meters to pixels (clamped to radius)
-      const nx = dx / rangeMeters
-      const ny = -dy / rangeMeters
-      const isClamped = Math.abs(nx) > 1 || Math.abs(ny) > 1
-
-      const px = clamp(nx, -1, 1) * r
-      const py = clamp(ny, -1, 1) * r
-
-      const near = clamp(1 - d / rangeMeters, 0, 1)
-      const sizeBase = 3
-      const size = sizeBase + near * 7
-
-      // If the point is out of range, emphasize it (edge arrow + blink).
-      const blink = 0.55 + 0.45 * Math.sin(tMs / 180)
-      const alpha = isClamped ? 0.35 + 0.45 * blink : 0.25 + near * 0.75
-
-      ctx.save()
-      ctx.rotate(-angle) // keep blips stable while sweep rotates
-
-      if (isFound) {
-        // Found: dimmed green
-        ctx.fillStyle = `rgba(90, 255, 170, ${alpha * 0.45})`
-        ctx.strokeStyle = `rgba(90, 255, 170, ${alpha * 0.25})`
-      } else {
-        // Unfound: per-target color
-        ctx.fillStyle = `${t.color}${Math.round(alpha * 255)
-          .toString(16)
-          .padStart(2, '0')}`
-        ctx.strokeStyle = `${t.color}${Math.round(alpha * 0.55 * 255)
-          .toString(16)
-          .padStart(2, '0')}`
-      }
-
-      ctx.beginPath()
-      ctx.arc(px, py, size, 0, Math.PI * 2)
-      ctx.fill()
-
-      // Outer pulse
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.arc(px, py, size + 6 + Math.sin(tMs / 140) * 2, 0, Math.PI * 2)
-      ctx.stroke()
-
-      // Edge arrow if clamped
-      if (isClamped) {
-        const ang = Math.atan2(py, px)
-        const ax = Math.cos(ang) * (r - 6)
-        const ay = Math.sin(ang) * (r - 6)
-        const s = 10
-        ctx.fillStyle = isFound
-          ? `rgba(90, 255, 170, ${0.25 + 0.35 * blink})`
-          : `${t.color}${Math.round((0.45 + 0.45 * blink) * 255)
-              .toString(16)
-              .padStart(2, '0')}`
-
-        ctx.beginPath()
-        ctx.moveTo(ax, ay)
-        ctx.lineTo(ax - Math.cos(ang - 0.55) * s, ay - Math.sin(ang - 0.55) * s)
-        ctx.lineTo(ax - Math.cos(ang + 0.55) * s, ay - Math.sin(ang + 0.55) * s)
-        ctx.closePath()
-        ctx.fill()
-      }
-
-      ctx.restore()
-    }
-  }
-
-  // Markers (stable relative to north-up)
-  ctx.save()
-  ctx.rotate(-angle)
-
-  // Cardinal directions (north-up)
-  ctx.fillStyle = 'rgba(0,0,0,0.65)'
-  ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-
-  const labelR = r - 12
-  const cardinals: Array<[string, number]> = [
-    ['N', 0],
-    ['E', Math.PI / 2],
-    ['S', Math.PI],
-    ['W', (Math.PI * 3) / 2]
-  ]
-  for (const [lab, ang] of cardinals) {
-    const x = Math.cos(ang - Math.PI / 2) * labelR
-    const y = Math.sin(ang - Math.PI / 2) * labelR
-    ctx.fillText(lab, x, y)
-  }
-
-  // Phone forward arrow removed per request.
-
-  // Movement/course arrow (cyan)
-  if (courseDeg.value != null) {
-    let cDeg: number
-    if (lockArrowsTop.value) {
-      cDeg = 0
-    } else if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
-      // Map is rotated to phone heading, so show course relative to phone-forward.
-      cDeg = normalize180(courseDeg.value - effectiveHeadingDeg.value)
-    } else {
-      // North-up: show absolute course.
-      cDeg = courseDeg.value
-    }
-
-    const c = (cDeg * Math.PI) / 180
-    const tipR = r - 26
-    const tx = Math.cos(c - Math.PI / 2) * tipR
-    const ty = Math.sin(c - Math.PI / 2) * tipR
-
-    const s = 10
-    ctx.fillStyle = 'rgba(120, 220, 255, 0.95)'
-    ctx.beginPath()
-    ctx.moveTo(tx, ty)
-    ctx.lineTo(tx - Math.cos(c - Math.PI / 2 - 0.55) * s, ty - Math.sin(c - Math.PI / 2 - 0.55) * s)
-    ctx.lineTo(tx - Math.cos(c - Math.PI / 2 + 0.55) * s, ty - Math.sin(c - Math.PI / 2 + 0.55) * s)
-    ctx.closePath()
-    ctx.fill()
-  }
-
-  ctx.restore()
-
-  // Scale bar (bottom-left)
-  {
-    const rangeMeters = range.value.rangeMeters
-    const nice: number[] = [10, 20, 50, 100, 200, 500, 1000, 2000]
-    // target ~ 1/3 radius
-    const targetMeters = rangeMeters * 0.33
-    let barMeters: number = nice[0]!
-    for (const v of nice) {
-      if (v <= targetMeters) barMeters = v
-    }
-
-    const barPx = (barMeters / rangeMeters) * r
-
-    ctx.save()
-    ctx.rotate(-angle)
-    ctx.translate(-r + 14, r - 18)
-
-    // Background label box first (so it doesn't cover the bar)
-    ctx.fillStyle = 'rgba(0,0,0,0.70)'
-    ctx.fillRect(-8, -22, barPx + 16, 22)
-
-    ctx.strokeStyle = 'rgba(0,0,0,0.65)'
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    ctx.moveTo(0, 0)
-    ctx.lineTo(barPx, 0)
-    ctx.stroke()
-
-    // End ticks
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(0, -5)
-    ctx.lineTo(0, 5)
-    ctx.moveTo(barPx, -5)
-    ctx.lineTo(barPx, 5)
-    ctx.stroke()
-
-    ctx.fillStyle = 'rgba(0,0,0,0.70)'
-    ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'top'
-    ctx.fillText(`${barMeters} m`, 0, -20)
-
-    ctx.restore()
-  }
-
-  // Border
-  ctx.strokeStyle = 'rgba(0,0,0,0.45)'
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  ctx.arc(0, 0, r, 0, Math.PI * 2)
-  ctx.stroke()
-
-  ctx.restore()
-
-  // Smooth rotation for map/overlay (DOM) in heading-up mode.
-  // We rotate the whole stack by -heading; smooth with shortest-angle step.
-  if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
-    // Keep rotation in (-180..180] to avoid 0/360 wrap causing an extra spin.
-    const target = normalize180(-effectiveHeadingDeg.value)
-    mapRotationDeg.value = normalize180(
-      mapRotationDeg.value + normalize180(target - mapRotationDeg.value) * 0.25
-    )
-  } else {
-    mapRotationDeg.value = 0
-  }
-
-  rafId = requestAnimationFrame(drawFrame)
-}
 
 onMounted(() => {
   loadFound()
@@ -674,20 +428,6 @@ onMounted(() => {
   maybeUpdateMapView()
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
-
-  // Init canvas background once
-  const canvas = canvasRef.value
-  if (canvas) {
-    const size = 360
-    canvas.width = size
-    canvas.height = size
-    const ctx = canvas.getContext('2d')
-    if (ctx) {
-      // Keep transparent so Google Maps can be seen underneath.
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-    }
-  }
-  rafId = requestAnimationFrame(drawFrame)
 
   // If previously completed, reflect it.
   if (allFound.value) status.value = 'success'
@@ -740,7 +480,11 @@ onBeforeUnmount(() => {
                 <v-btn size="small" variant="outlined" @click="openInBrowser(mapUrl)">用瀏覽器開地圖</v-btn>
               </div>
             </div>
-            <canvas ref="canvasRef" class="radar-canvas" />
+            <PixiRadarOverlay
+              :blips="radarBlips"
+              :range-meters="range.rangeMeters"
+              :sweep-speed="0.45"
+            />
           </div>
         </div>
       </div>
