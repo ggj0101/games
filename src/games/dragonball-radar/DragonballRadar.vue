@@ -109,15 +109,42 @@ const range = computed(() => {
 const watchId = ref<number | null>(null)
 
 // --- Device heading (compass) ---
+// Goal: radar "up" is always the phone's forward direction.
 const headingDeg = ref<number | null>(null)
 const headingError = ref<string>('')
+const screenAngleDeg = ref<number>(0)
 
 let orientationHandler: ((e: DeviceOrientationEvent) => void) | null = null
+let screenOrientationHandler: (() => void) | null = null
 
 function normalizeDeg(d: number) {
   const x = d % 360
   return x < 0 ? x + 360 : x
 }
+
+function updateScreenAngle() {
+  // Prefer Screen Orientation API.
+  const so = (screen as any)?.orientation
+  if (so && typeof so.angle === 'number' && Number.isFinite(so.angle)) {
+    screenAngleDeg.value = normalizeDeg(so.angle)
+    return
+  }
+
+  // Fallback (legacy iOS): window.orientation
+  const wo = (window as any)?.orientation
+  if (typeof wo === 'number' && Number.isFinite(wo)) {
+    screenAngleDeg.value = normalizeDeg(wo)
+    return
+  }
+
+  screenAngleDeg.value = 0
+}
+
+const effectiveHeadingDeg = computed(() => {
+  if (headingDeg.value == null) return null
+  // Compensate screen rotation (portrait/landscape) so "up" stays phone-forward.
+  return normalizeDeg(headingDeg.value - screenAngleDeg.value)
+})
 
 function computeHeadingFromEvent(e: DeviceOrientationEvent) {
   // iOS Safari
@@ -163,14 +190,27 @@ async function startCompass() {
     }
   }
 
+  if (!screenOrientationHandler) {
+    screenOrientationHandler = () => updateScreenAngle()
+  }
+
+  updateScreenAngle()
+  window.addEventListener('orientationchange', screenOrientationHandler as any)
+  ;(screen as any)?.orientation?.addEventListener?.('change', screenOrientationHandler as any)
+
   window.addEventListener('deviceorientationabsolute', orientationHandler as any, true)
   window.addEventListener('deviceorientation', orientationHandler as any, true)
 }
 
 function stopCompass() {
-  if (!orientationHandler) return
-  window.removeEventListener('deviceorientationabsolute', orientationHandler as any, true)
-  window.removeEventListener('deviceorientation', orientationHandler as any, true)
+  if (orientationHandler) {
+    window.removeEventListener('deviceorientationabsolute', orientationHandler as any, true)
+    window.removeEventListener('deviceorientation', orientationHandler as any, true)
+  }
+  if (screenOrientationHandler) {
+    window.removeEventListener('orientationchange', screenOrientationHandler as any)
+    ;(screen as any)?.orientation?.removeEventListener?.('change', screenOrientationHandler as any)
+  }
 }
 
 function startWatch() {
@@ -297,11 +337,10 @@ function drawFrame(tMs: number) {
 
       // Rotate into device frame so the radar "up" follows phone heading.
       // headingDeg: 0=north, 90=east.
-      if (headingDeg.value != null) {
+      if (effectiveHeadingDeg.value != null) {
         // Rotate world into device frame.
-        // Use -heading so that when phone faces north (0°), vectors stay the same;
-        // when phone turns east (90°), east becomes "up".
-        const h = (-headingDeg.value * Math.PI) / 180
+        // Use -heading so that the radar's up direction equals phone forward.
+        const h = (-effectiveHeadingDeg.value * Math.PI) / 180
         const rx = dx * Math.cos(h) - dy * Math.sin(h)
         const ry = dx * Math.sin(h) + dy * Math.cos(h)
         dx = rx
@@ -434,7 +473,7 @@ onBeforeUnmount(() => {
         <v-chip variant="tonal">range: {{ range.rangeMeters }}m</v-chip>
         <v-chip v-if="nearest" variant="tonal">最近: {{ nearest.t.name }} · {{ Math.round(nearest.meters) }}m</v-chip>
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
-        <v-chip v-if="headingDeg != null" variant="tonal">方位: {{ Math.round(headingDeg) }}°</v-chip>
+        <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位: {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
       </div>
 
       <v-alert v-if="headingError" type="info" class="mt-3" variant="tonal">
