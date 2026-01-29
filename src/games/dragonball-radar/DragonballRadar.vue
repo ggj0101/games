@@ -387,17 +387,8 @@ function drawFrame(tMs: number) {
       const d = haversineMeters(userPos.value, t)
       const isFound = !!found.value[t.name]
 
-      // Rotate into device frame so the radar "up" follows phone heading.
-      // headingDeg: 0=north, 90=east.
-      if (effectiveHeadingDeg.value != null) {
-        // Rotate world into device frame.
-        // Use -heading so that the radar's up direction equals phone forward.
-        const h = (-effectiveHeadingDeg.value * Math.PI) / 180
-        const rx = dx * Math.cos(h) - dy * Math.sin(h)
-        const ry = dx * Math.sin(h) + dy * Math.cos(h)
-        dx = rx
-        dy = ry
-      }
+      // In map-background mode, keep the radar north-up (same as Google Maps).
+      // Phone heading is shown separately as an arrow marker.
 
       // Map meters to pixels (clamped to radius)
       const nx = dx / rangeMeters
@@ -466,42 +457,44 @@ function drawFrame(tMs: number) {
     }
   }
 
-  // Heading markers (in device frame, stable)
+  // Markers (stable relative to north-up)
   ctx.save()
   ctx.rotate(-angle)
 
-  // Phone forward marker (always up)
-  ctx.fillStyle = 'rgba(80,255,160,0.85)'
-  ctx.beginPath()
-  ctx.moveTo(0, -r + 8)
-  ctx.lineTo(-8, -r + 24)
-  ctx.lineTo(8, -r + 24)
-  ctx.closePath()
-  ctx.fill()
+  // Cardinal directions (north-up)
+  ctx.fillStyle = 'rgba(255,255,255,0.78)'
+  ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
 
-  // Cardinal directions (relative to phone forward)
+  const labelR = r - 12
+  const cardinals: Array<[string, number]> = [
+    ['N', 0],
+    ['E', Math.PI / 2],
+    ['S', Math.PI],
+    ['W', (Math.PI * 3) / 2]
+  ]
+  for (const [lab, ang] of cardinals) {
+    const x = Math.cos(ang - Math.PI / 2) * labelR
+    const y = Math.sin(ang - Math.PI / 2) * labelR
+    ctx.fillText(lab, x, y)
+  }
+
+  // Phone forward arrow (points to heading on north-up radar)
   if (effectiveHeadingDeg.value != null) {
-    const base = (-effectiveHeadingDeg.value * Math.PI) / 180
+    const h = (effectiveHeadingDeg.value * Math.PI) / 180
+    const tipR = r - 8
+    const tx = Math.cos(h - Math.PI / 2) * tipR
+    const ty = Math.sin(h - Math.PI / 2) * tipR
 
-    ctx.fillStyle = 'rgba(255,255,255,0.78)'
-    ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-
-    const labelR = r - 12
-    const dirs: Array<[string, number]> = [
-      ['N', base],
-      ['E', base + Math.PI / 2],
-      ['S', base + Math.PI],
-      ['W', base + (Math.PI * 3) / 2]
-    ]
-
-    for (const [lab, ang] of dirs) {
-      // Convert bearing angle (0 at north, clockwise) into canvas coords.
-      const x = Math.cos(ang - Math.PI / 2) * labelR
-      const y = Math.sin(ang - Math.PI / 2) * labelR
-      ctx.fillText(lab, x, y)
-    }
+    const s = 12
+    ctx.fillStyle = 'rgba(80,255,160,0.9)'
+    ctx.beginPath()
+    ctx.moveTo(tx, ty)
+    ctx.lineTo(tx - Math.cos(h - Math.PI / 2 - 0.55) * s, ty - Math.sin(h - Math.PI / 2 - 0.55) * s)
+    ctx.lineTo(tx - Math.cos(h - Math.PI / 2 + 0.55) * s, ty - Math.sin(h - Math.PI / 2 + 0.55) * s)
+    ctx.closePath()
+    ctx.fill()
   }
 
   ctx.restore()
