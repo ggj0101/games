@@ -106,6 +106,71 @@ const range = computed(() => {
 
 const watchId = ref<number | null>(null)
 
+// --- Device heading (compass) ---
+const headingDeg = ref<number | null>(null)
+const headingError = ref<string>('')
+
+let orientationHandler: ((e: DeviceOrientationEvent) => void) | null = null
+
+function normalizeDeg(d: number) {
+  const x = d % 360
+  return x < 0 ? x + 360 : x
+}
+
+function computeHeadingFromEvent(e: DeviceOrientationEvent) {
+  // iOS Safari
+  const ios = e as unknown as { webkitCompassHeading?: number }
+  if (typeof ios.webkitCompassHeading === 'number' && Number.isFinite(ios.webkitCompassHeading)) {
+    return normalizeDeg(ios.webkitCompassHeading)
+  }
+
+  // Generic (often Android Chrome): alpha is rotation around Z.
+  // Convention varies; using (360 - alpha) usually maps to compass-like heading.
+  if (typeof e.alpha === 'number' && Number.isFinite(e.alpha)) {
+    return normalizeDeg(360 - e.alpha)
+  }
+
+  return null
+}
+
+async function startCompass() {
+  headingError.value = ''
+
+  if (typeof window === 'undefined' || typeof DeviceOrientationEvent === 'undefined') {
+    headingError.value = '此裝置/瀏覽器不支援指南針（DeviceOrientation）。'
+    return
+  }
+
+  const anyDO = DeviceOrientationEvent as unknown as {
+    requestPermission?: () => Promise<'granted' | 'denied'>
+  }
+
+  // iOS 13+ requires user gesture + permission.
+  if (typeof anyDO.requestPermission === 'function') {
+    const res = await anyDO.requestPermission().catch(() => 'denied' as const)
+    if (res !== 'granted') {
+      headingError.value = '指南針權限被拒絕。'
+      return
+    }
+  }
+
+  if (!orientationHandler) {
+    orientationHandler = (e: DeviceOrientationEvent) => {
+      const h = computeHeadingFromEvent(e)
+      if (h != null) headingDeg.value = h
+    }
+  }
+
+  window.addEventListener('deviceorientationabsolute', orientationHandler as any, true)
+  window.addEventListener('deviceorientation', orientationHandler as any, true)
+}
+
+function stopCompass() {
+  if (!orientationHandler) return
+  window.removeEventListener('deviceorientationabsolute', orientationHandler as any, true)
+  window.removeEventListener('deviceorientation', orientationHandler as any, true)
+}
+
 function startWatch() {
   if (!hasGeo) {
     status.value = 'error'
@@ -224,9 +289,19 @@ function drawFrame(tMs: number) {
     const rangeMeters = range.value.rangeMeters
 
     for (const t of targets) {
-      const { dx, dy } = toLocalMeters(userPos.value, t)
+      let { dx, dy } = toLocalMeters(userPos.value, t)
       const d = haversineMeters(userPos.value, t)
       const isFound = !!found.value[t.name]
+
+      // Rotate into device frame so the radar "up" follows phone heading.
+      // headingDeg: 0=north, 90=east.
+      if (headingDeg.value != null) {
+        const h = (headingDeg.value * Math.PI) / 180
+        const rx = dx * Math.cos(h) - dy * Math.sin(h)
+        const ry = dx * Math.sin(h) + dy * Math.cos(h)
+        dx = rx
+        dy = ry
+      }
 
       // Map meters to pixels (clamped to radius)
       const nx = dx / rangeMeters
@@ -303,6 +378,8 @@ function drawFrame(tMs: number) {
 
 onMounted(() => {
   loadFound()
+  // Try to start compass automatically (may require user gesture on iOS).
+  startCompass()
 
   // Init canvas background once
   const canvas = canvasRef.value
@@ -324,6 +401,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   stopWatch()
+  stopCompass()
   if (rafId != null) cancelAnimationFrame(rafId)
 })
 </script>
@@ -351,7 +429,15 @@ onBeforeUnmount(() => {
         <v-chip variant="tonal">range: {{ range.rangeMeters }}m</v-chip>
         <v-chip v-if="nearest" variant="tonal">最近: {{ nearest.t.name }} · {{ Math.round(nearest.meters) }}m</v-chip>
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
+        <v-chip v-if="headingDeg != null" variant="tonal">方位: {{ Math.round(headingDeg) }}°</v-chip>
       </div>
+
+      <v-alert v-if="headingError" type="info" class="mt-3" variant="tonal">
+        {{ headingError }}
+        <div class="mt-2">
+          <v-btn size="small" variant="outlined" @click="startCompass">啟用指南針</v-btn>
+        </div>
+      </v-alert>
 
       <v-alert v-if="errorMsg" type="warning" class="mt-3" variant="tonal">
         {{ errorMsg }}
