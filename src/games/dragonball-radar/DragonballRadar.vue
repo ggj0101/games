@@ -479,17 +479,29 @@ function drawFrame(tMs: number) {
   ctx.closePath()
   ctx.fill()
 
-  // North marker to debug offset (where north is relative to phone forward)
+  // Cardinal directions (relative to phone forward)
   if (effectiveHeadingDeg.value != null) {
-    const northAng = (-effectiveHeadingDeg.value * Math.PI) / 180
-    const nx = Math.cos(northAng - Math.PI / 2) * (r - 10)
-    const ny = Math.sin(northAng - Math.PI / 2) * (r - 10)
+    const base = (-effectiveHeadingDeg.value * Math.PI) / 180
 
-    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.fillStyle = 'rgba(255,255,255,0.78)'
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText('N', nx, ny)
+
+    const labelR = r - 12
+    const dirs: Array<[string, number]> = [
+      ['N', base],
+      ['E', base + Math.PI / 2],
+      ['S', base + Math.PI],
+      ['W', base + (Math.PI * 3) / 2]
+    ]
+
+    for (const [lab, ang] of dirs) {
+      // Convert bearing angle (0 at north, clockwise) into canvas coords.
+      const x = Math.cos(ang - Math.PI / 2) * labelR
+      const y = Math.sin(ang - Math.PI / 2) * labelR
+      ctx.fillText(lab, x, y)
+    }
   }
 
   ctx.restore()
