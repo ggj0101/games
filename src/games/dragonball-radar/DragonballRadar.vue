@@ -412,10 +412,8 @@ function drawFrame(tMs: number) {
   const cy = h / 2
   const r = Math.min(w, h) * 0.46
 
-  // Trail fade disabled (fully transparent background)
-  // If you want trails, set hud opacity > 0 and lower map opacity.
-  // ctx.fillStyle = 'rgba(0,0,0,0.08)'
-  // ctx.fillRect(0, 0, w, h)
+  // Clear every frame so the HUD doesn't accumulate (transparent background).
+  ctx.clearRect(0, 0, w, h)
 
   // Radar circles + cross
   ctx.save()
