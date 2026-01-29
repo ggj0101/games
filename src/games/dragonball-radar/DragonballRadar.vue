@@ -182,38 +182,11 @@ function updateScreenAngle() {
   screenAngleDeg.value = 0
 }
 
-const HEADING_OFFSET_KEY = 'dragonballRadar.headingOffsetDeg.v1'
-const headingOffsetDeg = ref<number>(0)
-
-function loadHeadingOffset() {
-  try {
-    const raw = localStorage.getItem(HEADING_OFFSET_KEY)
-    if (!raw) return
-    const n = Number(raw)
-    if (Number.isFinite(n)) headingOffsetDeg.value = normalizeDeg(n)
-  } catch {
-    // ignore
-  }
-}
-
-function saveHeadingOffset() {
-  try {
-    localStorage.setItem(HEADING_OFFSET_KEY, String(normalizeDeg(headingOffsetDeg.value)))
-  } catch {
-    // ignore
-  }
-}
-
-function adjustHeadingOffset(delta: number) {
-  headingOffsetDeg.value = normalizeDeg(headingOffsetDeg.value + delta)
-  saveHeadingOffset()
-}
-
+// Offset disabled per request.
 const effectiveHeadingDeg = computed(() => {
   if (headingDeg.value == null) return null
   // Compensate screen rotation (portrait/landscape) so "up" stays phone-forward.
-  // Also apply a user-calibrated offset.
-  return normalizeDeg(headingDeg.value - screenAngleDeg.value + headingOffsetDeg.value)
+  return normalizeDeg(headingDeg.value - screenAngleDeg.value)
 })
 
 function computeHeadingFromEvent(e: DeviceOrientationEvent) {
@@ -570,21 +543,31 @@ function drawFrame(tMs: number) {
     ctx.rotate(-angle)
     ctx.translate(-r + 14, r - 18)
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+    // Background label box first (so it doesn't cover the bar)
+    ctx.fillStyle = 'rgba(0,0,0,0.70)'
+    ctx.fillRect(-8, -22, barPx + 16, 22)
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'
     ctx.lineWidth = 3
     ctx.beginPath()
     ctx.moveTo(0, 0)
     ctx.lineTo(barPx, 0)
     ctx.stroke()
 
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(-6, -18, barPx + 12, 16)
+    // End ticks
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(0, -5)
+    ctx.lineTo(0, 5)
+    ctx.moveTo(barPx, -5)
+    ctx.lineTo(barPx, 5)
+    ctx.stroke()
 
-    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.fillStyle = 'rgba(255,255,255,0.95)'
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    ctx.fillText(`${barMeters} m`, 0, -16)
+    ctx.fillText(`${barMeters} m`, 0, -20)
 
     ctx.restore()
   }
@@ -615,7 +598,6 @@ function drawFrame(tMs: number) {
 
 onMounted(() => {
   loadFound()
-  loadHeadingOffset()
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
 
@@ -687,7 +669,7 @@ onBeforeUnmount(() => {
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位(手機): {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
         <v-chip v-if="courseDeg != null" variant="tonal">方位(行進): {{ Math.round(courseDeg) }}°</v-chip>
-        <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">offset: {{ Math.round(headingOffsetDeg) }}°</v-chip>
+        <!-- offset removed -->
 
         <v-chip v-if="userPos" variant="tonal">
           目前座標: {{ userPos.lat.toFixed(6) }}, {{ userPos.lng.toFixed(6) }}
@@ -729,10 +711,7 @@ onBeforeUnmount(() => {
           箭頭：{{ lockArrowsTop ? '固定上方' : '顯示角度' }}
         </v-btn>
 
-        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(-90)">offset -90°</v-btn>
-        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(90)">offset +90°</v-btn>
-        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(180)">offset +180°</v-btn>
-        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(0 - headingOffsetDeg)">offset reset</v-btn>
+        <!-- offset controls removed -->
       </div>
 
       <v-alert v-if="headingError" type="info" class="mt-3" variant="tonal">
