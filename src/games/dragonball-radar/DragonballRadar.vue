@@ -393,7 +393,7 @@ function drawFrame(tMs: number) {
   ctx.stroke()
 
   // Sweep line
-  const speed = status.value === 'success' ? 0.0 : 0.9 // turns/sec
+  const speed = status.value === 'success' ? 0.0 : 0.45 // turns/sec
   const angle = ((tMs / 1000) * speed * Math.PI * 2) % (Math.PI * 2)
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r)
   grad.addColorStop(0, 'rgba(80,255,160,0.55)')
