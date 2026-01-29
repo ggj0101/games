@@ -129,10 +129,10 @@ const range = computed(() => {
 
 const mapUrl = computed(() => {
   // No-key embed; center on user if available.
-  // Use @lat,lng,zoom form to avoid adding a pin marker.
+  // Use ll=lat,lng to avoid adding a pin marker (q= adds a marker).
   const z = range.value.mapZoom
   const center = userPos.value ?? nearest.value?.t ?? targets[0]!
-  return `https://www.google.com/maps/@${center.lat},${center.lng},${z}z?output=embed`
+  return `https://www.google.com/maps?ll=${center.lat},${center.lng}&z=${z}&output=embed`
 })
 
 const watchId = ref<number | null>(null)
