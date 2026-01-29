@@ -3,15 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import type { LatLng } from './geo'
 import { haversineMeters, toLocalMeters } from './geo'
+import { bearingDeg, normalize180 } from './bearing'
 import { clamp, pickRadarRange } from './radar'
 
-type Target = LatLng & { name: string; kind: 'dragonball' }
+type Target = LatLng & { name: string; kind: 'dragonball'; color: string }
 
 // Targets (WGS84) — dragonballs (no order)
 const targets: Target[] = [
-  { name: '新竹火車站', kind: 'dragonball', lat: 24.801588, lng: 120.971794 },
-  { name: '巨城購物中心', kind: 'dragonball', lat: 24.809449, lng: 120.9727305 },
-  { name: '新竹市香山綜合運動場', kind: 'dragonball', lat: 24.797, lng: 120.949 }
+  { name: '新竹火車站', kind: 'dragonball', lat: 24.801588, lng: 120.971794, color: '#ffb020' },
+  { name: '巨城購物中心', kind: 'dragonball', lat: 24.809449, lng: 120.9727305, color: '#4da3ff' },
+  { name: '新竹市香山綜合運動場', kind: 'dragonball', lat: 24.797, lng: 120.949, color: '#ff5aa5' }
 ]
 
 const successRadiusMeters = 50
@@ -71,11 +72,19 @@ const remainingTargets = computed(() => targets.filter((t) => !found.value[t.nam
 const distances = computed(() => {
   if (!userPos.value) return []
   return targets
-    .map((t) => ({
-      target: t,
-      meters: haversineMeters(userPos.value!, t),
-      isFound: !!found.value[t.name]
-    }))
+    .map((t) => {
+      const meters = haversineMeters(userPos.value!, t)
+      const brng = bearingDeg(userPos.value!, t)
+      const hdg = effectiveHeadingDeg.value
+      const delta = hdg == null ? null : normalize180(brng - hdg)
+      return {
+        target: t,
+        meters,
+        bearing: brng,
+        delta,
+        isFound: !!found.value[t.name]
+      }
+    })
     .sort((a, b) => a.meters - b.meters)
 })
 
@@ -376,9 +385,13 @@ function drawFrame(tMs: number) {
         ctx.fillStyle = `rgba(90, 255, 170, ${alpha * 0.45})`
         ctx.strokeStyle = `rgba(90, 255, 170, ${alpha * 0.25})`
       } else {
-        // Unfound: warm amber
-        ctx.fillStyle = `rgba(255, 170, 60, ${alpha})`
-        ctx.strokeStyle = `rgba(255, 190, 90, ${alpha * 0.55})`
+        // Unfound: per-target color
+        ctx.fillStyle = `${t.color}${Math.round(alpha * 255)
+          .toString(16)
+          .padStart(2, '0')}`
+        ctx.strokeStyle = `${t.color}${Math.round(alpha * 0.55 * 255)
+          .toString(16)
+          .padStart(2, '0')}`
       }
 
       ctx.beginPath()
@@ -399,7 +412,9 @@ function drawFrame(tMs: number) {
         const s = 10
         ctx.fillStyle = isFound
           ? `rgba(90, 255, 170, ${0.25 + 0.35 * blink})`
-          : `rgba(255, 190, 90, ${0.45 + 0.45 * blink})`
+          : `${t.color}${Math.round((0.45 + 0.45 * blink) * 255)
+              .toString(16)
+              .padStart(2, '0')}`
 
         ctx.beginPath()
         ctx.moveTo(ax, ay)
@@ -412,6 +427,34 @@ function drawFrame(tMs: number) {
       ctx.restore()
     }
   }
+
+  // Heading markers (in device frame, stable)
+  ctx.save()
+  ctx.rotate(-angle)
+
+  // Phone forward marker (always up)
+  ctx.fillStyle = 'rgba(80,255,160,0.85)'
+  ctx.beginPath()
+  ctx.moveTo(0, -r + 8)
+  ctx.lineTo(-8, -r + 24)
+  ctx.lineTo(8, -r + 24)
+  ctx.closePath()
+  ctx.fill()
+
+  // North marker to debug offset (where north is relative to phone forward)
+  if (effectiveHeadingDeg.value != null) {
+    const northAng = (-effectiveHeadingDeg.value * Math.PI) / 180
+    const nx = Math.cos(northAng - Math.PI / 2) * (r - 10)
+    const ny = Math.sin(northAng - Math.PI / 2) * (r - 10)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.75)'
+    ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('N', nx, ny)
+  }
+
+  ctx.restore()
 
   // Border
   ctx.strokeStyle = 'rgba(80,255,160,0.55)'
@@ -508,12 +551,16 @@ onBeforeUnmount(() => {
         <div class="text-subtitle-2 font-weight-bold mb-2">龍珠清單</div>
         <div class="d-flex flex-column" style="gap: 6px;">
           <div v-for="d in distances" :key="d.target.name" class="d-flex align-center justify-space-between">
-            <span class="text-body-2">
+            <span class="text-body-2 d-flex align-center" style="gap: 8px;">
               <span v-if="d.isFound">✅</span>
               <span v-else>🟠</span>
-              {{ d.target.name }}
+              <span class="dot" :style="{ background: d.isFound ? '#5affaa' : d.target.color }" />
+              <span>{{ d.target.name }}</span>
             </span>
-            <span class="text-body-2 text-medium-emphasis">{{ Math.round(d.meters) }} m</span>
+            <span class="text-body-2 text-medium-emphasis">
+              {{ Math.round(d.meters) }}m
+              <span v-if="d.delta != null"> · Δ{{ Math.round(d.delta) }}°</span>
+            </span>
           </div>
         </div>
       </div>
@@ -547,6 +594,13 @@ onBeforeUnmount(() => {
   width: min(78vw, 420px);
   height: min(78vw, 420px);
   border-radius: 999px;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.12);
 }
 
 .gap-2 {
