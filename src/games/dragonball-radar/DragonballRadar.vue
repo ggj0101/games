@@ -139,7 +139,7 @@ const watchId = ref<number | null>(null)
 // Map/radar orientation mode:
 // - north-up: match Google Maps default
 // - heading-up: rotate map+overlay so screen-up = phone forward
-const alignMode = ref<'north-up' | 'heading-up'>('north-up')
+const alignMode = ref<'north-up' | 'heading-up'>('heading-up')
 
 // --- Device heading (compass) ---
 // Goal: radar "up" is always the phone's forward direction.
@@ -533,11 +533,11 @@ function drawFrame(tMs: number) {
 
   // Movement/course arrow (cyan)
   if (courseDeg.value != null) {
-    let cDeg = courseDeg.value
-    if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
-      // Map is rotated to phone heading, so show course relative to phone-forward.
-      cDeg = normalize180(courseDeg.value - effectiveHeadingDeg.value)
-    }
+    // User request: in heading-up mode, keep arrow at screen top.
+    // The delta is still shown in the list (Δ°), so you can see the difference.
+    const cDeg = alignMode.value === 'heading-up'
+      ? 0
+      : courseDeg.value
 
     const c = (cDeg * Math.PI) / 180
     const tipR = r - 26
