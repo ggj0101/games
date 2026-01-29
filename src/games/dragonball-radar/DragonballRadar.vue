@@ -149,15 +149,38 @@ function updateScreenAngle() {
   screenAngleDeg.value = 0
 }
 
-// Empirical offset: some browsers report heading axis rotated by 90°.
-// Positive means rotate clockwise.
-const headingOffsetDeg = 90
+const HEADING_OFFSET_KEY = 'dragonballRadar.headingOffsetDeg.v1'
+const headingOffsetDeg = ref<number>(0)
+
+function loadHeadingOffset() {
+  try {
+    const raw = localStorage.getItem(HEADING_OFFSET_KEY)
+    if (!raw) return
+    const n = Number(raw)
+    if (Number.isFinite(n)) headingOffsetDeg.value = normalizeDeg(n)
+  } catch {
+    // ignore
+  }
+}
+
+function saveHeadingOffset() {
+  try {
+    localStorage.setItem(HEADING_OFFSET_KEY, String(normalizeDeg(headingOffsetDeg.value)))
+  } catch {
+    // ignore
+  }
+}
+
+function adjustHeadingOffset(delta: number) {
+  headingOffsetDeg.value = normalizeDeg(headingOffsetDeg.value + delta)
+  saveHeadingOffset()
+}
 
 const effectiveHeadingDeg = computed(() => {
   if (headingDeg.value == null) return null
   // Compensate screen rotation (portrait/landscape) so "up" stays phone-forward.
-  // Also apply an offset to align axes across devices.
-  return normalizeDeg(headingDeg.value - screenAngleDeg.value + headingOffsetDeg)
+  // Also apply a user-calibrated offset.
+  return normalizeDeg(headingDeg.value - screenAngleDeg.value + headingOffsetDeg.value)
 })
 
 function computeHeadingFromEvent(e: DeviceOrientationEvent) {
@@ -470,6 +493,7 @@ function drawFrame(tMs: number) {
 
 onMounted(() => {
   loadFound()
+  loadHeadingOffset()
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
 
@@ -522,6 +546,14 @@ onBeforeUnmount(() => {
         <v-chip v-if="nearest" variant="tonal">最近: {{ nearest.t.name }} · {{ Math.round(nearest.meters) }}m</v-chip>
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位: {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
+        <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">offset: {{ Math.round(headingOffsetDeg) }}°</v-chip>
+      </div>
+
+      <div class="mt-2 d-flex flex-wrap gap-2">
+        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(-90)">offset -90°</v-btn>
+        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(90)">offset +90°</v-btn>
+        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(180)">offset +180°</v-btn>
+        <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(0 - headingOffsetDeg)">offset reset</v-btn>
       </div>
 
       <v-alert v-if="headingError" type="info" class="mt-3" variant="tonal">
