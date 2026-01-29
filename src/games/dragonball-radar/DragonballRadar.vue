@@ -21,6 +21,14 @@ const LS_KEY = 'dragonballRadar.found.v1'
 
 const hasGeo = typeof navigator !== 'undefined' && 'geolocation' in navigator
 
+function copyText(text: string) {
+  try {
+    navigator.clipboard?.writeText(text)
+  } catch {
+    // ignore
+  }
+}
+
 const status = ref<'idle' | 'watching' | 'denied' | 'error' | 'success'>('idle')
 const errorMsg = ref<string>('')
 
@@ -562,6 +570,27 @@ onBeforeUnmount(() => {
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位: {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">offset: {{ Math.round(headingOffsetDeg) }}°</v-chip>
+
+        <v-chip v-if="userPos" variant="tonal">
+          目前座標: {{ userPos.lat.toFixed(6) }}, {{ userPos.lng.toFixed(6) }}
+        </v-chip>
+      </div>
+
+      <div v-if="userPos" class="mt-2 d-flex flex-wrap gap-2">
+        <v-btn
+          size="small"
+          variant="outlined"
+          @click="copyText(`${userPos.lat},${userPos.lng}`)"
+        >
+          複製座標
+        </v-btn>
+        <v-btn
+          size="small"
+          variant="outlined"
+          @click="copyText(`https://www.google.com/maps?q=${userPos.lat},${userPos.lng}`)"
+        >
+          複製 Google Maps 連結
+        </v-btn>
       </div>
 
       <div class="mt-2 d-flex flex-wrap gap-2">
