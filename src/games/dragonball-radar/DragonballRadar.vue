@@ -35,6 +35,10 @@ const errorMsg = ref<string>('')
 const userPos = ref<LatLng | null>(null)
 const accuracy = ref<number | null>(null)
 
+// Movement (course over ground) estimated from GPS deltas.
+const lastFix = ref<{ pos: LatLng; t: number } | null>(null)
+const courseDeg = ref<number | null>(null)
+
 const found = ref<Record<string, true>>({})
 
 function loadFound() {
@@ -282,8 +286,31 @@ function startWatch() {
 
   watchId.value = navigator.geolocation.watchPosition(
     (pos) => {
-      userPos.value = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+      const now = Date.now()
+      const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+      userPos.value = nextPos
       accuracy.value = pos.coords.accuracy ?? null
+
+      // Estimate movement direction (course) from last GPS fix.
+      if (lastFix.value) {
+        const dt = (now - lastFix.value.t) / 1000
+        const moved = haversineMeters(lastFix.value.pos, nextPos)
+
+        // Filter tiny jitter; require a bit of movement.
+        if (dt > 0.2 && dt < 20 && moved > 2) {
+          const b = bearingDeg(lastFix.value.pos, nextPos)
+          // Smooth course to reduce jitter.
+          if (courseDeg.value == null) {
+            courseDeg.value = b
+          } else {
+            // circular lerp
+            const prev = courseDeg.value
+            const diff = normalize180(b - prev)
+            courseDeg.value = (prev + diff * 0.25 + 360) % 360
+          }
+        }
+      }
+      lastFix.value = { pos: nextPos, t: now }
 
       // Mark any nearby (unfound) dragonball as found.
       for (const t of remainingTargets.value) {
@@ -485,10 +512,8 @@ function drawFrame(tMs: number) {
     ctx.fillText(lab, x, y)
   }
 
-  // Phone forward arrow
+  // Phone forward arrow (green)
   if (effectiveHeadingDeg.value != null) {
-    // In north-up mode, arrow points to heading.
-    // In heading-up mode (map rotated), arrow should point straight up.
     const hDeg = alignMode.value === 'heading-up' ? 0 : effectiveHeadingDeg.value
     const h = (hDeg * Math.PI) / 180
 
@@ -502,6 +527,29 @@ function drawFrame(tMs: number) {
     ctx.moveTo(tx, ty)
     ctx.lineTo(tx - Math.cos(h - Math.PI / 2 - 0.55) * s, ty - Math.sin(h - Math.PI / 2 - 0.55) * s)
     ctx.lineTo(tx - Math.cos(h - Math.PI / 2 + 0.55) * s, ty - Math.sin(h - Math.PI / 2 + 0.55) * s)
+    ctx.closePath()
+    ctx.fill()
+  }
+
+  // Movement/course arrow (cyan)
+  if (courseDeg.value != null) {
+    let cDeg = courseDeg.value
+    if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
+      // Map is rotated to phone heading, so show course relative to phone-forward.
+      cDeg = normalize180(courseDeg.value - effectiveHeadingDeg.value)
+    }
+
+    const c = (cDeg * Math.PI) / 180
+    const tipR = r - 26
+    const tx = Math.cos(c - Math.PI / 2) * tipR
+    const ty = Math.sin(c - Math.PI / 2) * tipR
+
+    const s = 10
+    ctx.fillStyle = 'rgba(120, 220, 255, 0.95)'
+    ctx.beginPath()
+    ctx.moveTo(tx, ty)
+    ctx.lineTo(tx - Math.cos(c - Math.PI / 2 - 0.55) * s, ty - Math.sin(c - Math.PI / 2 - 0.55) * s)
+    ctx.lineTo(tx - Math.cos(c - Math.PI / 2 + 0.55) * s, ty - Math.sin(c - Math.PI / 2 + 0.55) * s)
     ctx.closePath()
     ctx.fill()
   }
@@ -592,7 +640,8 @@ onBeforeUnmount(() => {
         <v-chip variant="tonal">range: {{ range.rangeMeters }}m</v-chip>
         <v-chip v-if="nearest" variant="tonal">最近: {{ nearest.t.name }} · {{ Math.round(nearest.meters) }}m</v-chip>
         <v-chip v-if="accuracy != null" variant="tonal">精度: ±{{ Math.round(accuracy) }}m</v-chip>
-        <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位: {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
+        <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">方位(手機): {{ Math.round(effectiveHeadingDeg) }}°</v-chip>
+        <v-chip v-if="courseDeg != null" variant="tonal">方位(行進): {{ Math.round(courseDeg) }}°</v-chip>
         <v-chip v-if="effectiveHeadingDeg != null" variant="tonal">offset: {{ Math.round(headingOffsetDeg) }}°</v-chip>
 
         <v-chip v-if="userPos" variant="tonal">
