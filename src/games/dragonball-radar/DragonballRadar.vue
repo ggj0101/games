@@ -194,7 +194,7 @@ const lockArrowsTop = ref<boolean>(true)
 const MAP_OPACITY_KEY = 'dragonballRadar.mapOpacity.v1'
 const HUD_OPACITY_KEY = 'dragonballRadar.hudOpacity.v1'
 const mapOpacity = ref<number>(1)
-const hudOpacity = ref<number>(0.6)
+const hudOpacity = ref<number>(0)
 
 function loadOpacity() {
   try {
@@ -412,15 +412,22 @@ function drawFrame(tMs: number) {
   const cy = h / 2
   const r = Math.min(w, h) * 0.46
 
-  // Trail fade (keep map visible behind)
-  ctx.fillStyle = 'rgba(0,0,0,0.08)'
-  ctx.fillRect(0, 0, w, h)
+  // Trail fade disabled (fully transparent background)
+  // If you want trails, set hud opacity > 0 and lower map opacity.
+  // ctx.fillStyle = 'rgba(0,0,0,0.08)'
+  // ctx.fillRect(0, 0, w, h)
 
   // Radar circles + cross
   ctx.save()
   ctx.translate(cx, cy)
 
-  ctx.strokeStyle = 'rgba(80, 255, 160, 0.25)'
+  // Smoother lines
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  // (imageSmoothingEnabled mostly affects images, but harmless)
+  ;(ctx as any).imageSmoothingEnabled = true
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)'
   ctx.lineWidth = 2
   for (const k of [0.25, 0.5, 0.75, 1]) {
     ctx.beginPath()
@@ -439,12 +446,12 @@ function drawFrame(tMs: number) {
   const speed = status.value === 'success' ? 0.0 : 0.45 // turns/sec
   const angle = ((tMs / 1000) * speed * Math.PI * 2) % (Math.PI * 2)
   const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, r)
-  grad.addColorStop(0, 'rgba(80,255,160,0.55)')
-  grad.addColorStop(0.65, 'rgba(80,255,160,0.18)')
-  grad.addColorStop(1, 'rgba(80,255,160,0)')
+  grad.addColorStop(0, 'rgba(0,0,0,0.25)')
+  grad.addColorStop(0.65, 'rgba(0,0,0,0.10)')
+  grad.addColorStop(1, 'rgba(0,0,0,0)')
 
   ctx.rotate(angle)
-  ctx.strokeStyle = 'rgba(80,255,160,0.75)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.moveTo(0, 0)
@@ -543,7 +550,7 @@ function drawFrame(tMs: number) {
   ctx.rotate(-angle)
 
   // Cardinal directions (north-up)
-  ctx.fillStyle = 'rgba(255,255,255,0.78)'
+  ctx.fillStyle = 'rgba(0,0,0,0.65)'
   ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -614,7 +621,7 @@ function drawFrame(tMs: number) {
     ctx.fillStyle = 'rgba(0,0,0,0.70)'
     ctx.fillRect(-8, -22, barPx + 16, 22)
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)'
     ctx.lineWidth = 3
     ctx.beginPath()
     ctx.moveTo(0, 0)
@@ -630,7 +637,7 @@ function drawFrame(tMs: number) {
     ctx.lineTo(barPx, 5)
     ctx.stroke()
 
-    ctx.fillStyle = 'rgba(255,255,255,0.95)'
+    ctx.fillStyle = 'rgba(0,0,0,0.70)'
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
@@ -640,7 +647,7 @@ function drawFrame(tMs: number) {
   }
 
   // Border
-  ctx.strokeStyle = 'rgba(80,255,160,0.55)'
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)'
   ctx.lineWidth = 3
   ctx.beginPath()
   ctx.arc(0, 0, r, 0, Math.PI * 2)
