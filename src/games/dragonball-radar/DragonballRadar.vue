@@ -132,6 +132,11 @@ const mapUrl = computed(() => {
 
 const watchId = ref<number | null>(null)
 
+// Map/radar orientation mode:
+// - north-up: match Google Maps default
+// - heading-up: rotate map+overlay so screen-up = phone forward
+const alignMode = ref<'north-up' | 'heading-up'>('north-up')
+
 // --- Device heading (compass) ---
 // Goal: radar "up" is always the phone's forward direction.
 const headingDeg = ref<number | null>(null)
@@ -480,9 +485,13 @@ function drawFrame(tMs: number) {
     ctx.fillText(lab, x, y)
   }
 
-  // Phone forward arrow (points to heading on north-up radar)
+  // Phone forward arrow
   if (effectiveHeadingDeg.value != null) {
-    const h = (effectiveHeadingDeg.value * Math.PI) / 180
+    // In north-up mode, arrow points to heading.
+    // In heading-up mode (map rotated), arrow should point straight up.
+    const hDeg = alignMode.value === 'heading-up' ? 0 : effectiveHeadingDeg.value
+    const h = (hDeg * Math.PI) / 180
+
     const tipR = r - 8
     const tx = Math.cos(h - Math.PI / 2) * tipR
     const ty = Math.sin(h - Math.PI / 2) * tipR
@@ -559,13 +568,23 @@ onBeforeUnmount(() => {
 
       <div class="d-flex justify-center">
         <div class="radar-stack">
-          <iframe
-            class="map-iframe"
-            :src="mapUrl"
-            loading="lazy"
-            referrerpolicy="no-referrer-when-downgrade"
-          />
-          <canvas ref="canvasRef" class="radar-canvas" />
+          <div
+            class="radar-stack"
+            :class="{ 'heading-up': alignMode === 'heading-up' }"
+            :style="
+              alignMode === 'heading-up' && effectiveHeadingDeg != null
+                ? { transform: `rotate(${-effectiveHeadingDeg}deg)` }
+                : undefined
+            "
+          >
+            <iframe
+              class="map-iframe"
+              :src="mapUrl"
+              loading="lazy"
+              referrerpolicy="no-referrer-when-downgrade"
+            />
+            <canvas ref="canvasRef" class="radar-canvas" />
+          </div>
         </div>
       </div>
 
@@ -599,6 +618,15 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="mt-2 d-flex flex-wrap gap-2">
+        <v-btn
+          size="small"
+          variant="outlined"
+          :disabled="effectiveHeadingDeg == null"
+          @click="alignMode = alignMode === 'north-up' ? 'heading-up' : 'north-up'"
+        >
+          地圖對齊：{{ alignMode === 'north-up' ? '北朝上' : '面向上' }}
+        </v-btn>
+
         <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(-90)">offset -90°</v-btn>
         <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(90)">offset +90°</v-btn>
         <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(180)">offset +180°</v-btn>
@@ -677,6 +705,8 @@ onBeforeUnmount(() => {
   height: min(78vw, 420px);
   border-radius: 999px;
   overflow: hidden;
+  transform-origin: center center;
+  transition: transform 140ms linear;
 }
 
 .map-iframe {
