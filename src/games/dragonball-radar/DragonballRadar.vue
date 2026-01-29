@@ -138,13 +138,36 @@ const range = computed(() => {
 const mapNonce = ref<number>(0)
 const mapLoaded = ref<boolean>(false)
 
+// Stabilize map center/zoom to avoid iframe reloading (flashing) on every GPS tick.
+const mapCenter = ref<LatLng>(targets[0]!)
+const mapZoom = ref<number>(15)
+
+function round(n: number, digits: number) {
+  const k = 10 ** digits
+  return Math.round(n * k) / k
+}
+
+function maybeUpdateMapView() {
+  const center = userPos.value ?? nearest.value?.t
+  if (!center) return
+
+  // Update only when moved enough to matter (reduces reloads)
+  const moved = haversineMeters(mapCenter.value, center)
+  const nextZoom = range.value.mapZoom
+
+  if (moved > 25 || nextZoom !== mapZoom.value) {
+    // Round coords so tiny jitter doesn't trigger changes
+    mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
+    mapZoom.value = nextZoom
+    mapLoaded.value = false
+  }
+}
+
 const mapUrl = computed(() => {
-  // No-key embed; center on user if available.
+  // No-key embed.
   // Use ll=lat,lng to avoid adding a pin marker (q= adds a marker).
-  const z = range.value.mapZoom
-  const center = userPos.value ?? nearest.value?.t ?? targets[0]!
   const cb = mapNonce.value
-  return `https://www.google.com/maps?ll=${center.lat},${center.lng}&z=${z}&output=embed&cb=${cb}`
+  return `https://www.google.com/maps?ll=${mapCenter.value.lat},${mapCenter.value.lng}&z=${mapZoom.value}&output=embed&cb=${cb}`
 })
 
 function reloadMap() {
@@ -315,6 +338,7 @@ function startWatch() {
       const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }
       userPos.value = nextPos
       accuracy.value = pos.coords.accuracy ?? null
+      maybeUpdateMapView()
 
       // Estimate movement direction (course) from last GPS fix.
       if (lastFix.value) {
@@ -642,6 +666,7 @@ function drawFrame(tMs: number) {
 onMounted(() => {
   loadFound()
   loadOpacity()
+  maybeUpdateMapView()
   // Try to start compass automatically (may require user gesture on iOS).
   startCompass()
 
