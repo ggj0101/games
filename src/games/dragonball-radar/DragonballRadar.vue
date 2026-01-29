@@ -518,26 +518,7 @@ function drawFrame(tMs: number) {
     ctx.fillText(lab, x, y)
   }
 
-  // Phone forward arrow (green)
-  if (effectiveHeadingDeg.value != null) {
-    const hDeg = lockArrowsTop.value
-      ? 0
-      : (alignMode.value === 'heading-up' ? 0 : effectiveHeadingDeg.value)
-    const h = (hDeg * Math.PI) / 180
-
-    const tipR = r - 8
-    const tx = Math.cos(h - Math.PI / 2) * tipR
-    const ty = Math.sin(h - Math.PI / 2) * tipR
-
-    const s = 12
-    ctx.fillStyle = 'rgba(80,255,160,0.9)'
-    ctx.beginPath()
-    ctx.moveTo(tx, ty)
-    ctx.lineTo(tx - Math.cos(h - Math.PI / 2 - 0.55) * s, ty - Math.sin(h - Math.PI / 2 - 0.55) * s)
-    ctx.lineTo(tx - Math.cos(h - Math.PI / 2 + 0.55) * s, ty - Math.sin(h - Math.PI / 2 + 0.55) * s)
-    ctx.closePath()
-    ctx.fill()
-  }
+  // Phone forward arrow removed per request.
 
   // Movement/course arrow (cyan)
   if (courseDeg.value != null) {
