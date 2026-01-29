@@ -95,11 +95,13 @@ const range = computed(() => {
   const n = nearest.value
   if (!n) return { rangeMeters: 2000, mapZoom: 15 }
 
-  // Keep the nearest target comfortably inside the radar (leave a little headroom).
-  // Clamp to reasonable bounds so it doesn't zoom infinitely.
-  const autoRangeMeters = clamp(Math.max(60, n.meters * 1.15), 60, 4000)
+  // Auto range that still lets the blip move toward the center as you approach.
+  // Use a fixed padding instead of a pure ratio; otherwise the nearest blip would
+  // stick near the same ring forever.
+  const paddingMeters = 200
+  const autoRangeMeters = clamp(Math.max(60, n.meters + paddingMeters), 60, 4000)
 
-  // Reuse the existing distance→zoom mapping (kept for future; map is removed).
+  // Kept for future (map removed), but still handy as a proxy for scale.
   const z = pickRadarRange(n.meters).mapZoom
   return { rangeMeters: Math.round(autoRangeMeters), mapZoom: z }
 })
@@ -296,7 +298,10 @@ function drawFrame(tMs: number) {
       // Rotate into device frame so the radar "up" follows phone heading.
       // headingDeg: 0=north, 90=east.
       if (headingDeg.value != null) {
-        const h = (headingDeg.value * Math.PI) / 180
+        // Rotate world into device frame.
+        // Use -heading so that when phone faces north (0°), vectors stay the same;
+        // when phone turns east (90°), east becomes "up".
+        const h = (-headingDeg.value * Math.PI) / 180
         const rx = dx * Math.cos(h) - dy * Math.sin(h)
         const ry = dx * Math.sin(h) + dy * Math.cos(h)
         dx = rx
