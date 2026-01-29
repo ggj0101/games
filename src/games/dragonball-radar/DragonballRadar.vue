@@ -601,8 +601,11 @@ function drawFrame(tMs: number) {
   // Smooth rotation for map/overlay (DOM) in heading-up mode.
   // We rotate the whole stack by -heading; smooth with shortest-angle step.
   if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
-    const target = -effectiveHeadingDeg.value
-    mapRotationDeg.value = mapRotationDeg.value + normalize180(target - mapRotationDeg.value) * 0.25
+    // Keep rotation in (-180..180] to avoid 0/360 wrap causing an extra spin.
+    const target = normalize180(-effectiveHeadingDeg.value)
+    mapRotationDeg.value = normalize180(
+      mapRotationDeg.value + normalize180(target - mapRotationDeg.value) * 0.25
+    )
   } else {
     mapRotationDeg.value = 0
   }
