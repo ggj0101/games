@@ -230,7 +230,8 @@ const headingDeg = ref<number | null>(null)
 const headingError = ref<string>('')
 const screenAngleDeg = ref<number>(0)
 
-let orientationHandler: ((e: DeviceOrientationEvent) => void) | null = null
+// eslint-disable-next-line no-unused-vars
+let orientationHandler: ((_e: DeviceOrientationEvent) => void) | null = null
 let screenOrientationHandler: (() => void) | null = null
 
 function normalizeDeg(d: number) {

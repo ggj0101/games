@@ -26,6 +26,13 @@ const games = computed<Game[]>(() => [
     description: '真實定位雷達：接近目標會拉近，抵達後顯示成功找到。',
     to: '/dragonball-radar',
     status: 'ready'
+  },
+  {
+    key: 'star-catcher',
+    title: '星星接接樂（Star Catcher）',
+    description: '接住掉下來的星星！越到後面越快。',
+    to: '/star-catcher',
+    status: 'ready'
   }
 ])
 
