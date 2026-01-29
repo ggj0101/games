@@ -141,6 +141,11 @@ const watchId = ref<number | null>(null)
 // - heading-up: rotate map+overlay so screen-up = phone forward
 const alignMode = ref<'north-up' | 'heading-up'>('heading-up')
 
+// Arrow mode:
+// - locked: keep arrows at screen top
+// - dynamic: arrows indicate angles (depending on mode)
+const lockArrowsTop = ref<boolean>(true)
+
 // --- Device heading (compass) ---
 // Goal: radar "up" is always the phone's forward direction.
 const headingDeg = ref<number | null>(null)
@@ -514,7 +519,9 @@ function drawFrame(tMs: number) {
 
   // Phone forward arrow (green)
   if (effectiveHeadingDeg.value != null) {
-    const hDeg = alignMode.value === 'heading-up' ? 0 : effectiveHeadingDeg.value
+    const hDeg = lockArrowsTop.value
+      ? 0
+      : (alignMode.value === 'heading-up' ? 0 : effectiveHeadingDeg.value)
     const h = (hDeg * Math.PI) / 180
 
     const tipR = r - 8
@@ -533,11 +540,16 @@ function drawFrame(tMs: number) {
 
   // Movement/course arrow (cyan)
   if (courseDeg.value != null) {
-    // User request: in heading-up mode, keep arrow at screen top.
-    // The delta is still shown in the list (Δ°), so you can see the difference.
-    const cDeg = alignMode.value === 'heading-up'
-      ? 0
-      : courseDeg.value
+    let cDeg: number
+    if (lockArrowsTop.value) {
+      cDeg = 0
+    } else if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
+      // Map is rotated to phone heading, so show course relative to phone-forward.
+      cDeg = normalize180(courseDeg.value - effectiveHeadingDeg.value)
+    } else {
+      // North-up: show absolute course.
+      cDeg = courseDeg.value
+    }
 
     const c = (cDeg * Math.PI) / 180
     const tipR = r - 26
@@ -555,6 +567,42 @@ function drawFrame(tMs: number) {
   }
 
   ctx.restore()
+
+  // Scale bar (bottom-left)
+  {
+    const rangeMeters = range.value.rangeMeters
+    const nice: number[] = [10, 20, 50, 100, 200, 500, 1000, 2000]
+    // target ~ 1/3 radius
+    const targetMeters = rangeMeters * 0.33
+    let barMeters: number = nice[0]!
+    for (const v of nice) {
+      if (v <= targetMeters) barMeters = v
+    }
+
+    const barPx = (barMeters / rangeMeters) * r
+
+    ctx.save()
+    ctx.rotate(-angle)
+    ctx.translate(-r + 14, r - 18)
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'
+    ctx.lineWidth = 3
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.lineTo(barPx, 0)
+    ctx.stroke()
+
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillRect(-6, -18, barPx + 12, 16)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.font = '12px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.fillText(`${barMeters} m`, 0, -16)
+
+    ctx.restore()
+  }
 
   // Border
   ctx.strokeStyle = 'rgba(80,255,160,0.55)'
@@ -674,6 +722,14 @@ onBeforeUnmount(() => {
           @click="alignMode = alignMode === 'north-up' ? 'heading-up' : 'north-up'"
         >
           地圖對齊：{{ alignMode === 'north-up' ? '北朝上' : '面向上' }}
+        </v-btn>
+
+        <v-btn
+          size="small"
+          variant="outlined"
+          @click="lockArrowsTop = !lockArrowsTop"
+        >
+          箭頭：{{ lockArrowsTop ? '固定上方' : '顯示角度' }}
         </v-btn>
 
         <v-btn size="small" variant="outlined" @click="adjustHeadingOffset(-90)">offset -90°</v-btn>
