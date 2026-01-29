@@ -345,8 +345,8 @@ function drawFrame(tMs: number) {
   const cy = h / 2
   const r = Math.min(w, h) * 0.46
 
-  // Trail fade
-  ctx.fillStyle = 'rgba(0,0,0,0.18)'
+  // Trail fade (keep map visible behind)
+  ctx.fillStyle = 'rgba(0,0,0,0.08)'
   ctx.fillRect(0, 0, w, h)
 
   // Radar circles + cross
@@ -609,8 +609,8 @@ onMounted(() => {
     canvas.height = size
     const ctx = canvas.getContext('2d')
     if (ctx) {
-      ctx.fillStyle = '#000'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      // Keep transparent so Google Maps can be seen underneath.
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
     }
   }
   rafId = requestAnimationFrame(drawFrame)
@@ -791,6 +791,12 @@ onBeforeUnmount(() => {
   transition: none;
 }
 
+:root {
+  /* You can tune these to taste. */
+  --map-opacity: 1;
+  --hud-opacity: 0.6;
+}
+
 .map-iframe {
   position: absolute;
   inset: 0;
@@ -798,6 +804,7 @@ onBeforeUnmount(() => {
   height: 100%;
   border: 0;
   z-index: 0;
+  opacity: var(--map-opacity);
   /* Don't steal scroll/drag; radar is a HUD. */
   pointer-events: none;
   filter: saturate(1.05) contrast(1.05);
@@ -809,6 +816,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   z-index: 1;
+  opacity: var(--hud-opacity);
   border-radius: 999px;
 }
 
