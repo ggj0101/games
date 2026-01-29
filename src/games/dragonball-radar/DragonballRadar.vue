@@ -797,6 +797,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   border: 0;
+  z-index: 0;
   /* Don't steal scroll/drag; radar is a HUD. */
   pointer-events: none;
   filter: saturate(1.05) contrast(1.05);
@@ -807,6 +808,7 @@ onBeforeUnmount(() => {
   inset: 0;
   width: 100%;
   height: 100%;
+  z-index: 1;
   border-radius: 999px;
 }
 
