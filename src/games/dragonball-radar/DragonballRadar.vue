@@ -130,7 +130,34 @@ const range = computed(() => {
   return { rangeMeters: Math.round(autoRangeMeters), mapZoom: z }
 })
 
-// Google Maps embed disabled.
+// --- Google Maps embed (optional background) ---
+const showMap = ref<boolean>(true)
+const mapCenter = ref<LatLng>({ lat: targets[0]!.lat, lng: targets[0]!.lng })
+const mapZoom = ref<number>(15)
+
+function round(n: number, digits: number) {
+  const k = 10 ** digits
+  return Math.round(n * k) / k
+}
+
+function updateMapView(force = false) {
+  const center = userPos.value ?? nearest.value?.t
+  if (!center) return
+
+  const moved = haversineMeters(mapCenter.value, center)
+  const nextZoom = range.value.mapZoom
+
+  // Only update when it would matter; reduces iframe reload / flashing.
+  if (force || moved > 50 || nextZoom !== mapZoom.value) {
+    mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
+    mapZoom.value = nextZoom
+  }
+}
+
+const mapUrl = computed(() => {
+  // No-key embed. Use ll= to avoid pin markers.
+  return `https://www.google.com/maps?ll=${mapCenter.value.lat},${mapCenter.value.lng}&z=${mapZoom.value}&output=embed`
+})
 
 // --- Pixi radar overlay data ---
 const radarBlips = computed(() => {
@@ -323,7 +350,7 @@ async function startWatch() {
       const nextPos = { lat: pos.coords.latitude, lng: pos.coords.longitude }
       userPos.value = nextPos
       accuracy.value = pos.coords.accuracy ?? null
-      // maybeUpdateMapView() removed (google maps disabled)
+      if (showMap.value) updateMapView(false)
 
       // Estimate movement direction (course) from last GPS fix.
       if (lastFix.value) {
@@ -403,6 +430,9 @@ onMounted(() => {
   loadFound()
   loadOpacity()
 
+  // Initialize map center/zoom once (won't auto-reload frequently).
+  if (showMap.value) updateMapView(true)
+
   // Start rotation smoothing loop (compass permission may still require user gesture).
   if (rafId == null) rafId = requestAnimationFrame(tick)
 
@@ -443,7 +473,13 @@ onBeforeUnmount(() => {
               '--hud-opacity': String(hudOpacity)
             }"
           >
-            <!-- Google Maps layer removed (Embed API restrictions / blank iframe issues) -->
+            <iframe
+              v-if="showMap"
+              class="map-iframe"
+              :src="mapUrl"
+              loading="eager"
+              referrerpolicy="no-referrer-when-downgrade"
+            />
             <PixiRadarOverlay
               :blips="radarBlips"
               :range-meters="range.rangeMeters"
@@ -519,6 +555,14 @@ onBeforeUnmount(() => {
           地圖對齊：{{ alignMode === 'north-up' ? '北朝上' : '面向上' }}
         </v-btn>
 
+        <v-btn size="small" variant="outlined" @click="showMap = !showMap">
+          地圖：{{ showMap ? '顯示' : '隱藏' }}
+        </v-btn>
+
+        <v-btn size="small" variant="outlined" :disabled="!showMap" @click="updateMapView(true)">
+          地圖置中
+        </v-btn>
+
         <v-btn
           size="small"
           variant="outlined"
@@ -526,8 +570,6 @@ onBeforeUnmount(() => {
         >
           箭頭：{{ lockArrowsTop ? '固定上方' : '顯示角度' }}
         </v-btn>
-
-        <!-- offset controls removed -->
       </div>
 
       <v-alert v-if="headingError" type="info" class="mt-3" variant="tonal">
@@ -624,18 +666,22 @@ onBeforeUnmount(() => {
 
 :root {
   /* You can tune these to taste. */
+  --map-opacity: 1;
   --hud-opacity: 0.6;
 }
 
-.radar-canvas {
+.map-iframe {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  z-index: 1;
-  opacity: var(--hud-opacity);
-  border-radius: 999px;
+  border: 0;
+  z-index: 0;
+  opacity: var(--map-opacity);
+  pointer-events: none;
 }
+
+/* Pixi overlay uses absolute mount with z-index:1 */
 
 .dot {
   width: 10px;
