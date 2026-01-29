@@ -19,6 +19,13 @@ const games = computed<Game[]>(() => [
     description: '2D 打磚塊：用擋板反彈球，清光所有磚塊。',
     to: '/breakout',
     status: 'ready'
+  },
+  {
+    key: 'dragonball-radar',
+    title: '龍珠雷達',
+    description: '真實定位雷達：接近目標會拉近，抵達後顯示成功找到。',
+    to: '/dragonball-radar',
+    status: 'ready'
   }
 ])
 
