@@ -12,7 +12,7 @@ type Target = LatLng & { name: string; kind: 'dragonball'; color: string }
 const targets: Target[] = [
   { name: '新竹火車站', kind: 'dragonball', lat: 24.801588, lng: 120.971794, color: '#ffb020' },
   { name: '巨城購物中心', kind: 'dragonball', lat: 24.809449, lng: 120.9727305, color: '#4da3ff' },
-  { name: '新竹市香山綜合運動場', kind: 'dragonball', lat: 24.797, lng: 120.949, color: '#ff5aa5' }
+  { name: '老家', kind: 'dragonball', lat: 24.79959308997481, lng: 120.9214003201404, color: '#ff5aa5' }
 ]
 
 const successRadiusMeters = 50
