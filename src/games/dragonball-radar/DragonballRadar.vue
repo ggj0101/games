@@ -163,6 +163,9 @@ const alignMode = ref<'north-up' | 'heading-up'>('heading-up')
 // Smooth DOM rotation so we don't jump at 359° -> 0°.
 const mapRotationDeg = ref<number>(0)
 
+// Audio must be unlocked by a user gesture on most mobile browsers.
+const audioArmed = ref<boolean>(false)
+
 // Arrow mode:
 // - locked: keep arrows at screen top
 // - dynamic: arrows indicate angles (depending on mode)
@@ -300,12 +303,16 @@ function stopCompass() {
   }
 }
 
-function startWatch() {
+async function startWatch() {
   if (!hasGeo) {
     status.value = 'error'
     errorMsg.value = '此瀏覽器不支援定位（Geolocation）。'
     return
   }
+
+  // Unlock audio + request compass permission in a user gesture context.
+  audioArmed.value = true
+  await startCompass()
 
   status.value = 'watching'
   errorMsg.value = ''
@@ -375,15 +382,29 @@ function stopWatch() {
   watchId.value = null
 }
 
-// Canvas renderer removed (replaced by Pixi overlay).
+// Animation loop for heading-up rotation smoothing.
 let rafId: number | null = null
+
+function tick() {
+  if (alignMode.value === 'heading-up' && effectiveHeadingDeg.value != null) {
+    // Keep rotation in (-180..180] to avoid 0/360 wrap.
+    const target = normalize180(-effectiveHeadingDeg.value)
+    mapRotationDeg.value = normalize180(
+      mapRotationDeg.value + normalize180(target - mapRotationDeg.value) * 0.25
+    )
+  } else {
+    mapRotationDeg.value = 0
+  }
+
+  rafId = requestAnimationFrame(tick)
+}
 
 onMounted(() => {
   loadFound()
   loadOpacity()
-  // maybeUpdateMapView() removed (google maps disabled)
-  // Try to start compass automatically (may require user gesture on iOS).
-  startCompass()
+
+  // Start rotation smoothing loop (compass permission may still require user gesture).
+  if (rafId == null) rafId = requestAnimationFrame(tick)
 
   // If previously completed, reflect it.
   if (allFound.value) status.value = 'success'
@@ -427,6 +448,7 @@ onBeforeUnmount(() => {
               :blips="radarBlips"
               :range-meters="range.rangeMeters"
               :sweep-speed="0.45"
+              :audio-armed="audioArmed"
             />
           </div>
         </div>

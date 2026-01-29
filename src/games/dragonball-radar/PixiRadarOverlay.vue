@@ -18,6 +18,8 @@ const props = defineProps<{
   rangeMeters: number
   // radar sweep speed turns / sec
   sweepSpeed?: number
+  // audio must be armed by a user gesture
+  audioArmed?: boolean
 }>()
 
 const mountRef = ref<HTMLDivElement | null>(null)
@@ -296,6 +298,13 @@ onMounted(async () => {
     { deep: true }
   )
 
+  watch(
+    () => props.audioArmed,
+    () => {
+      if (props.audioArmed) void ensureAudio()
+    }
+  )
+
   // Resize listener
   const onResize = () => {
     rCache = layout().r
@@ -305,11 +314,21 @@ onMounted(async () => {
 
   // --- Beep (WebAudio) ---
   let audioCtx: AudioContext | null = null
-  function beep() {
+
+  async function ensureAudio() {
+    if (!props.audioArmed) return
     try {
       if (!audioCtx) audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
-      if (audioCtx.state === 'suspended') audioCtx.resume()
+      if (audioCtx.state === 'suspended') await audioCtx.resume()
+    } catch {
+      // ignore
+    }
+  }
 
+  function beep() {
+    if (!props.audioArmed || !audioCtx || audioCtx.state !== 'running') return
+
+    try {
       const t0 = audioCtx.currentTime
       const osc = audioCtx.createOscillator()
       const gain = audioCtx.createGain()
@@ -407,6 +426,7 @@ onMounted(async () => {
 
   // Initial
   renderBlips()
+  void ensureAudio()
 
   destroyFn = () => {
     window.removeEventListener('resize', onResize)
