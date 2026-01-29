@@ -110,9 +110,16 @@ const range = computed(() => {
   const paddingMeters = 200
   const autoRangeMeters = clamp(Math.max(60, n.meters + paddingMeters), 60, 4000)
 
-  // Kept for future (map removed), but still handy as a proxy for scale.
   const z = pickRadarRange(n.meters).mapZoom
   return { rangeMeters: Math.round(autoRangeMeters), mapZoom: z }
+})
+
+const mapUrl = computed(() => {
+  // No-key embed; center on user if available.
+  const z = range.value.mapZoom
+  const center = userPos.value ?? nearest.value?.t ?? targets[0]!
+  const q = `${center.lat},${center.lng}`
+  return `https://www.google.com/maps?q=${encodeURIComponent(q)}&z=${z}&output=embed`
 })
 
 const watchId = ref<number | null>(null)
@@ -538,7 +545,15 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="d-flex justify-center">
-        <canvas ref="canvasRef" class="radar-canvas" />
+        <div class="radar-stack">
+          <iframe
+            class="map-iframe"
+            :src="mapUrl"
+            loading="lazy"
+            referrerpolicy="no-referrer-when-downgrade"
+          />
+          <canvas ref="canvasRef" class="radar-canvas" />
+        </div>
       </div>
 
       <div class="mt-3 d-flex flex-wrap gap-2">
@@ -622,9 +637,30 @@ onBeforeUnmount(() => {
   width: min(560px, 100%);
 }
 
-.radar-canvas {
+.radar-stack {
+  position: relative;
   width: min(78vw, 420px);
   height: min(78vw, 420px);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.map-iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* Don't steal scroll/drag; radar is a HUD. */
+  pointer-events: none;
+  filter: saturate(1.05) contrast(1.05);
+}
+
+.radar-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border-radius: 999px;
 }
 
