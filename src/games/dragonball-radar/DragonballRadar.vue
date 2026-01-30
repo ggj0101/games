@@ -148,12 +148,13 @@ function round(n: number, digits: number) {
 
 // Map follow tuning (so it *feels* like it follows you, not "stuck")
 const followEnabled = ref<boolean>(true)
-const followThresholdMeters = ref<number>(5)
-const followMinIntervalMs = ref<number>(1500)
+const followThresholdMeters = ref<number>(3)
+const followMinIntervalMs = ref<number>(1000)
 
 // Optional: keep map zoom closer so movement is visually obvious,
 // without affecting radar range scaling.
-const mapFixedZoomEnabled = ref<boolean>(false)
+// Default ON because otherwise walking distance is hard to perceive.
+const mapFixedZoomEnabled = ref<boolean>(true)
 const mapFixedZoom = ref<number>(16)
 
 let lastMapUpdateAt = 0
