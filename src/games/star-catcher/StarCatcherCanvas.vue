@@ -1,42 +1,64 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
+type StarKind = 'small' | 'big' | 'buff' | 'debuff'
+
 type Star = {
   id: number
+  kind: StarKind
   x: number
   y: number
-  r: number
+  r: number // rendered radius (CSS px)
+  rMax?: number
+  rMin?: number
   vy: number // px/s
+  hp?: number // 0..1 for big
 }
 
 type Status = 'ready' | 'playing' | 'gameover'
 
 type Config = {
   cssHeight: number
-  basketY: number
-  basketH: number
-  basketWStart: number
-  basketWEnd: number
   roundSeconds: number
   lives: number
   spawnMsStart: number
   spawnMsEnd: number
   fallSpeedStart: number
   fallSpeedEnd: number
+  bigRatioStart: number
+  bigRatioEnd: number
+  bigHoldSeconds: number // ~0.9s to clear
+  bigHitPadding: number // +10px
+  comboWindowSeconds: number
+  magnetSeconds: number
+  stickySeconds: number
+  magnetHitBonus: number
+  stickyBurnMul: number
+  powerupEveryMsMin: number
+  powerupEveryMsMax: number
+  powerupBuffChance: number
 }
 
 const cfg: Config = {
   cssHeight: 480,
-  basketY: 420,
-  basketH: 22,
-  basketWStart: 120,
-  basketWEnd: 90,
   roundSeconds: 60,
   lives: 3,
   spawnMsStart: 900,
   spawnMsEnd: 350,
   fallSpeedStart: 120,
-  fallSpeedEnd: 320
+  fallSpeedEnd: 320,
+  bigRatioStart: 0.2,
+  bigRatioEnd: 0.45,
+  bigHoldSeconds: 0.9,
+  bigHitPadding: 10,
+  comboWindowSeconds: 1.2,
+  magnetSeconds: 3,
+  stickySeconds: 3,
+  magnetHitBonus: 12,
+  stickyBurnMul: 0.6,
+  powerupEveryMsMin: 6000,
+  powerupEveryMsMax: 10000,
+  powerupBuffChance: 0.7
 }
 
 const wrapperRef = ref<HTMLDivElement | null>(null)
@@ -49,26 +71,42 @@ const combo = ref(0)
 const timeLeft = ref(cfg.roundSeconds)
 const muted = ref(false)
 
+// Timed effects
+const magnetLeft = ref(0) // seconds
+const stickyLeft = ref(0) // seconds
+
 const roundProgress = computed(() => {
   const t = 1 - timeLeft.value / cfg.roundSeconds
   return Math.max(0, Math.min(1, t))
 })
+
+const magnetOn = computed(() => magnetLeft.value > 0)
+const stickyOn = computed(() => stickyLeft.value > 0)
 
 let raf = 0
 let lastTs = 0
 let nextStarId = 1
 let stars: Star[] = []
 
-// Basket is in "CSS pixel" coordinates (our game coordinate system)
-let basketX = 160 // center x
-
 // Difficulty
 let elapsed = 0
 let spawnAccMs = 0
+let powerupAccMs = 0
+let nextPowerupMs = 8000
+
+// Combo timing
+let comboLeft = 0
+
+// Pointer hold state (single pointer MVP)
+let activePointerId: number | null = null
+let activeStarId: number | null = null
+let pointerDown = false
+let pointerX = 0
+let pointerY = 0
 
 // Simple screen flash feedback
 let flashMiss = 0 // 0..1
-let flashCatch = 0 // 0..1
+let flashClear = 0 // 0..1
 
 // --- Audio (WebAudio synth beeps) ---
 let audioCtx: AudioContext | null = null
@@ -127,6 +165,33 @@ function beepDown() {
   o.stop(now + 0.3)
 }
 
+function sfxStart() {
+  ensureAudio()
+  beep(660, 50, 'sine', 0.05)
+}
+
+function sfxTapClear() {
+  beep(880, 40, 'sine', 0.05)
+}
+
+function sfxHoldClear() {
+  // bright two-tone
+  beep(660, 35, 'triangle', 0.05)
+  setTimeout(() => beep(990, 45, 'triangle', 0.05), 40)
+}
+
+function sfxMissBig() {
+  beep(220, 70, 'square', 0.03)
+}
+
+function sfxBuffOn() {
+  beep(784, 60, 'sine', 0.05)
+}
+
+function sfxDebuffOn() {
+  beep(196, 80, 'triangle', 0.05)
+}
+
 // --- Helpers ---
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t
@@ -134,6 +199,14 @@ function lerp(a: number, b: number, t: number) {
 
 function easeIn(t: number) {
   return t * t
+}
+
+function clamp(v: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, v))
+}
+
+function randBetween(a: number, b: number) {
+  return a + Math.random() * (b - a)
 }
 
 function currentSpawnMs() {
@@ -144,12 +217,17 @@ function currentFallSpeed() {
   return lerp(cfg.fallSpeedStart, cfg.fallSpeedEnd, easeIn(roundProgress.value))
 }
 
-function currentBasketW() {
-  return lerp(cfg.basketWStart, cfg.basketWEnd, roundProgress.value)
+function currentBigRatio() {
+  return lerp(cfg.bigRatioStart, cfg.bigRatioEnd, roundProgress.value)
 }
 
-function clamp(v: number, a: number, b: number) {
-  return Math.max(a, Math.min(b, v))
+function hitBonus() {
+  return (magnetOn.value ? cfg.magnetHitBonus : 0)
+}
+
+function currentBurnRate() {
+  const base = 1 / cfg.bigHoldSeconds // hp per second
+  return base * (stickyOn.value ? cfg.stickyBurnMul : 1)
 }
 
 function resetGame() {
@@ -157,23 +235,36 @@ function resetGame() {
   score.value = 0
   lives.value = cfg.lives
   combo.value = 0
+  comboLeft = 0
   timeLeft.value = cfg.roundSeconds
   elapsed = 0
   spawnAccMs = 0
+  powerupAccMs = 0
+  nextPowerupMs = randBetween(cfg.powerupEveryMsMin, cfg.powerupEveryMsMax)
   stars = []
+  magnetLeft.value = 0
+  stickyLeft.value = 0
   flashMiss = 0
-  flashCatch = 0
+  flashClear = 0
+  activePointerId = null
+  activeStarId = null
+  pointerDown = false
 }
 
 function startGame() {
-  ensureAudio()
-  beep(660, 50, 'sine', 0.05)
+  sfxStart()
   status.value = 'playing'
   elapsed = 0
   spawnAccMs = 0
+  powerupAccMs = 0
+  nextPowerupMs = randBetween(cfg.powerupEveryMsMin, cfg.powerupEveryMsMax)
   stars = []
   combo.value = 0
+  comboLeft = 0
   timeLeft.value = cfg.roundSeconds
+  lives.value = cfg.lives
+  magnetLeft.value = 0
+  stickyLeft.value = 0
 }
 
 function endGame() {
@@ -182,26 +273,95 @@ function endGame() {
 }
 
 function spawnStar(w: number) {
-  const r = 10 + Math.random() * 6
+  const isBig = Math.random() < currentBigRatio()
+
+  if (isBig) {
+    const rMax = 26
+    const rMin = 10
+    const r = rMax
+    const x = r + Math.random() * (w - r * 2)
+    const y = -r - 2
+    const vy = currentFallSpeed()
+    stars.push({ id: nextStarId++, kind: 'big', x, y, r, rMax, rMin, vy, hp: 1 })
+    return
+  }
+
+  const r = 10 + Math.random() * 4
   const x = r + Math.random() * (w - r * 2)
   const y = -r - 2
   const vy = currentFallSpeed()
-  stars.push({ id: nextStarId++, x, y, r, vy })
+  stars.push({ id: nextStarId++, kind: 'small', x, y, r, vy })
 }
 
-function intersectsStarBasket(s: Star, wBasket: number) {
-  const left = basketX - wBasket / 2
-  const right = basketX + wBasket / 2
-  const top = cfg.basketY
-  const bottom = cfg.basketY + cfg.basketH
-
-  // quick circle-in-rect check
-  return s.x >= left - s.r && s.x <= right + s.r && s.y + s.r >= top && s.y - s.r <= bottom
+function spawnPowerup(w: number) {
+  const isBuff = Math.random() < cfg.powerupBuffChance
+  const kind: StarKind = isBuff ? 'buff' : 'debuff'
+  const r = 14
+  const x = r + Math.random() * (w - r * 2)
+  const y = -r - 2
+  const vy = currentFallSpeed() * 0.9
+  stars.push({ id: nextStarId++, kind, x, y, r, vy })
 }
 
-function addScoreForCatch() {
-  const bonus = Math.floor(combo.value / 5)
-  score.value += 1 + bonus
+function distance(x1: number, y1: number, x2: number, y2: number) {
+  const dx = x1 - x2
+  const dy = y1 - y2
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
+function hitRadiusForStar(s: Star) {
+  if (s.kind === 'big') return (s.r || 0) + cfg.bigHitPadding + hitBonus()
+  if (s.kind === 'buff' || s.kind === 'debuff') return s.r + 8 + hitBonus()
+  return s.r + hitBonus()
+}
+
+function pickStarAt(x: number, y: number) {
+  // pick topmost (last drawn) by scanning from end
+  for (let i = stars.length - 1; i >= 0; i--) {
+    const s = stars[i]
+    if (!s) continue
+    const hr = hitRadiusForStar(s)
+    if (distance(x, y, s.x, s.y) <= hr) return s
+  }
+  return null
+}
+
+function clearStar(s: Star, reason: 'tap' | 'hold' | 'powerup') {
+  if (reason === 'tap') sfxTapClear()
+  if (reason === 'hold') sfxHoldClear()
+
+  if (s.kind === 'small') {
+    addScore(1)
+  } else if (s.kind === 'big') {
+    addScore(3)
+  } else if (s.kind === 'buff') {
+    magnetLeft.value = cfg.magnetSeconds
+    sfxBuffOn()
+  } else if (s.kind === 'debuff') {
+    stickyLeft.value = cfg.stickySeconds
+    sfxDebuffOn()
+  }
+
+  // Combo grows on clearing stars (not on powerups)
+  if (s.kind === 'small' || s.kind === 'big') {
+    combo.value += 1
+    comboLeft = cfg.comboWindowSeconds
+  }
+
+  flashClear = 1
+
+  // remove from list
+  stars = stars.filter((x) => x.id !== s.id)
+
+  // If we were holding it, clear hold state
+  if (activeStarId === s.id) {
+    activeStarId = null
+  }
+}
+
+function addScore(base: number) {
+  const bonus = Math.min(5, Math.floor(combo.value / 5))
+  score.value += base + bonus
 }
 
 function resizeCanvas() {
@@ -244,33 +404,90 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number) {
   }
   ctx.globalAlpha = 1
 
-  // miss/catch flash overlay
+  // miss/clear flash overlay
   if (flashMiss > 0) {
     ctx.fillStyle = `rgba(255,60,60,${0.18 * flashMiss})`
     ctx.fillRect(0, 0, w, h)
   }
-  if (flashCatch > 0) {
-    ctx.fillStyle = `rgba(80,200,255,${0.14 * flashCatch})`
+  if (flashClear > 0) {
+    ctx.fillStyle = `rgba(80,200,255,${0.14 * flashClear})`
     ctx.fillRect(0, 0, w, h)
   }
 
   // ground line
+  const groundY = h - 24
   ctx.strokeStyle = 'rgba(255,255,255,0.15)'
   ctx.beginPath()
-  ctx.moveTo(0, cfg.basketY + cfg.basketH + 10)
-  ctx.lineTo(w, cfg.basketY + cfg.basketH + 10)
+  ctx.moveTo(0, groundY)
+  ctx.lineTo(w, groundY)
   ctx.stroke()
+
+  // active effect hints
+  if (magnetOn.value) {
+    ctx.strokeStyle = 'rgba(90,190,255,0.35)'
+    ctx.lineWidth = 6
+    ctx.strokeRect(6, 6, w - 12, h - 12)
+    ctx.lineWidth = 1
+  }
+  if (stickyOn.value) {
+    ctx.fillStyle = 'rgba(190,120,255,0.10)'
+    ctx.fillRect(0, 0, w, h)
+  }
 
   // stars
   for (const s of stars) {
+    if (s.kind === 'buff') {
+      // Magnet buff icon
+      ctx.fillStyle = 'rgba(80,160,255,0.25)'
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.r * 1.8, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = '#4aa3ff'
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(s.x - 4, s.y, 5, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(s.x + 4, s.y, 5, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.lineWidth = 1
+      continue
+    }
+
+    if (s.kind === 'debuff') {
+      // Sticky debuff icon
+      ctx.fillStyle = 'rgba(190,120,255,0.2)'
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.r * 1.8, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = '#b97aff'
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'
+      ctx.beginPath()
+      ctx.arc(s.x - 4, s.y - 2, 2.2, 0, Math.PI * 2)
+      ctx.arc(s.x + 3, s.y + 1, 2.6, 0, Math.PI * 2)
+      ctx.fill()
+      continue
+    }
+
     // glow
-    ctx.fillStyle = 'rgba(255, 235, 120, 0.2)'
+    ctx.fillStyle = s.kind === 'big' ? 'rgba(255, 190, 90, 0.18)' : 'rgba(255, 235, 120, 0.2)'
     ctx.beginPath()
     ctx.arc(s.x, s.y, s.r * 1.8, 0, Math.PI * 2)
     ctx.fill()
 
     // core
-    ctx.fillStyle = '#ffe66d'
+    ctx.fillStyle = s.kind === 'big' ? '#ffb84a' : '#ffe66d'
     ctx.beginPath()
     ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
     ctx.fill()
@@ -280,25 +497,20 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number) {
     ctx.beginPath()
     ctx.arc(s.x - s.r * 0.3, s.y - s.r * 0.3, Math.max(1.5, s.r * 0.22), 0, Math.PI * 2)
     ctx.fill()
+
+    // big star progress ring
+    if (s.kind === 'big' && typeof s.hp === 'number') {
+      const p = clamp(1 - s.hp, 0, 1)
+      ctx.strokeStyle = 'rgba(255,255,255,0.75)'
+      ctx.lineWidth = 3
+      ctx.beginPath()
+      ctx.arc(s.x, s.y, Math.max(s.r + 6, 14), -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p)
+      ctx.stroke()
+      ctx.lineWidth = 1
+    }
   }
 
-  // basket
-  const bw = currentBasketW()
-  const bx = basketX - bw / 2
-  const by = cfg.basketY
-
-  ctx.fillStyle = '#4aa3ff'
-  const r = 10
-  ctx.beginPath()
-  ctx.moveTo(bx + r, by)
-  ctx.arcTo(bx + bw, by, bx + bw, by + cfg.basketH, r)
-  ctx.arcTo(bx + bw, by + cfg.basketH, bx, by + cfg.basketH, r)
-  ctx.arcTo(bx, by + cfg.basketH, bx, by, r)
-  ctx.arcTo(bx, by, bx + bw, by, r)
-  ctx.closePath()
-  ctx.fill()
-
-  // HUD text
+  // HUD text (inside canvas)
   ctx.fillStyle = 'rgba(255,255,255,0.92)'
   ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
   ctx.fillText(`Score: ${score.value}`, 14, 26)
@@ -306,8 +518,11 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number) {
   ctx.fillText(`Time: ${Math.ceil(timeLeft.value)}s`, 14, 70)
   ctx.fillText(`Combo: ${combo.value}`, 14, 92)
 
+  if (magnetOn.value) ctx.fillText(`Magnet: ${Math.ceil(magnetLeft.value)}s`, 14, 114)
+  if (stickyOn.value) ctx.fillText(`Sticky: ${Math.ceil(stickyLeft.value)}s`, 14, magnetOn.value ? 136 : 114)
+
   if (status.value === 'ready') {
-    drawCenterText(ctx, w, h, 'Tap / Click to Start', '接住星星！')
+    drawCenterText(ctx, w, h, 'Tap to Start', '點星星消除（大星可長按分段磨掉）')
   } else if (status.value === 'gameover') {
     drawCenterText(ctx, w, h, 'Game Over', 'Tap / Click to Restart')
   }
@@ -323,10 +538,33 @@ function drawCenterText(ctx: CanvasRenderingContext2D, w: number, h: number, tit
   ctx.textAlign = 'center'
   ctx.fillText(title, w / 2, h / 2 - 10)
 
-  ctx.font = '16px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
+  ctx.font = '15px system-ui, -apple-system, Segoe UI, Roboto, sans-serif'
   ctx.fillStyle = 'rgba(255,255,255,0.9)'
   ctx.fillText(subtitle, w / 2, h / 2 + 20)
   ctx.restore()
+}
+
+function updateHoldDamage(dt: number) {
+  if (!pointerDown) return
+  if (activePointerId == null || activeStarId == null) return
+
+  const s = stars.find((x) => x.id === activeStarId)
+  if (!s || s.kind !== 'big' || typeof s.hp !== 'number') return
+
+  const hr = hitRadiusForStar(s)
+  const inHit = distance(pointerX, pointerY, s.x, s.y) <= hr
+  if (!inHit) return
+
+  s.hp = clamp(s.hp - currentBurnRate() * dt, 0, 1)
+
+  // update radius to visualize progress
+  const rMax = s.rMax ?? 26
+  const rMin = s.rMin ?? 10
+  s.r = rMin + (rMax - rMin) * s.hp
+
+  if (s.hp <= 0) {
+    clearStar(s, 'hold')
+  }
 }
 
 function loop(ts: number) {
@@ -343,16 +581,27 @@ function loop(ts: number) {
   const rect = wrapper.getBoundingClientRect()
   const w = Math.max(280, Math.floor(rect.width))
   const h = cfg.cssHeight
+  const groundY = h - 24
 
   // decay flashes
   flashMiss = Math.max(0, flashMiss - dt * 2.5)
-  flashCatch = Math.max(0, flashCatch - dt * 3.2)
+  flashClear = Math.max(0, flashClear - dt * 3.2)
+
+  // effects countdown
+  magnetLeft.value = Math.max(0, magnetLeft.value - dt)
+  stickyLeft.value = Math.max(0, stickyLeft.value - dt)
+
+  // combo countdown
+  if (comboLeft > 0) {
+    comboLeft = Math.max(0, comboLeft - dt)
+    if (comboLeft === 0) combo.value = 0
+  }
 
   if (status.value === 'playing') {
     elapsed += dt
     timeLeft.value = Math.max(0, cfg.roundSeconds - elapsed)
 
-    // spawn
+    // spawn stars
     spawnAccMs += dt * 1000
     const spawnMs = currentSpawnMs()
     while (spawnAccMs >= spawnMs) {
@@ -360,35 +609,40 @@ function loop(ts: number) {
       spawnStar(w)
     }
 
+    // spawn powerups occasionally
+    powerupAccMs += dt * 1000
+    if (powerupAccMs >= nextPowerupMs) {
+      powerupAccMs = 0
+      nextPowerupMs = randBetween(cfg.powerupEveryMsMin, cfg.powerupEveryMsMax)
+      spawnPowerup(w)
+    }
+
     // update stars
-    const bw = currentBasketW()
     for (const s of stars) {
       s.vy = currentFallSpeed()
       s.y += s.vy * dt
     }
 
-    // collisions / misses
+    // apply hold damage
+    updateHoldDamage(dt)
+
+    // misses (only big costs lives)
     const still: Star[] = []
     for (const s of stars) {
-      if (intersectsStarBasket(s, bw)) {
-        combo.value += 1
-        addScoreForCatch()
-        flashCatch = 1
-        beep(880, 40, 'sine', 0.05)
-        continue
-      }
-
-      if (s.y - s.r > h) {
-        lives.value -= 1
-        combo.value = 0
-        flashMiss = 1
-        beep(220, 60, 'square', 0.03)
-        if (lives.value <= 0) {
-          endGame()
+      if (s.y - s.r > groundY) {
+        if (s.kind === 'big') {
+          lives.value -= 1
+          combo.value = 0
+          comboLeft = 0
+          flashMiss = 1
+          sfxMissBig()
+          if (lives.value <= 0) {
+            endGame()
+          }
         }
+        // small/powerups just disappear on ground
         continue
       }
-
       still.push(s)
     }
     stars = still
@@ -398,10 +652,6 @@ function loop(ts: number) {
       beepDown()
     }
   }
-
-  // clamp basket
-  const bw = currentBasketW()
-  basketX = clamp(basketX, bw / 2, w - bw / 2)
 
   const ctx = canvas.getContext('2d')
   if (!ctx) return
@@ -423,38 +673,80 @@ function stopLoop() {
   raf = 0
 }
 
-function setBasketFromClientX(clientX: number) {
+function clientToCanvasXY(clientX: number, clientY: number) {
   const canvas = canvasRef.value
-  if (!canvas) return
+  if (!canvas) return { x: 0, y: 0 }
   const rect = canvas.getBoundingClientRect()
-  basketX = clamp(clientX - rect.left, 0, rect.width)
+  return {
+    x: clientX - rect.left,
+    y: clientY - rect.top
+  }
 }
 
-function onPointerMove(e: PointerEvent) {
-  setBasketFromClientX(e.clientX)
-}
-
-function onPointerDown() {
+function onPointerDown(e: PointerEvent) {
   // first user gesture → enable audio on iOS
   ensureAudio()
 
-  if (status.value === 'ready') startGame()
-  else if (status.value === 'gameover') {
+  const { x, y } = clientToCanvasXY(e.clientX, e.clientY)
+  pointerX = x
+  pointerY = y
+  pointerDown = true
+
+  // Start/restart on tap
+  if (status.value === 'ready') {
+    startGame()
+    return
+  }
+  if (status.value === 'gameover') {
     resetGame()
     startGame()
+    return
+  }
+
+  if (status.value !== 'playing') return
+
+  // Interaction
+  const s = pickStarAt(x, y)
+  if (!s) return
+
+  // capture pointer so we still receive up/cancel
+  try {
+    canvasRef.value?.setPointerCapture(e.pointerId)
+  } catch {
+    // ignore
+  }
+
+  if (s.kind === 'small') {
+    clearStar(s, 'tap')
+    return
+  }
+
+  if (s.kind === 'buff' || s.kind === 'debuff') {
+    clearStar(s, 'powerup')
+    return
+  }
+
+  // big: start holding
+  activePointerId = e.pointerId
+  activeStarId = s.id
+}
+
+function onPointerMove(e: PointerEvent) {
+  const { x, y } = clientToCanvasXY(e.clientX, e.clientY)
+  pointerX = x
+  pointerY = y
+}
+
+function onPointerUp(e: PointerEvent) {
+  pointerDown = false
+  if (activePointerId === e.pointerId) {
+    activePointerId = null
+    activeStarId = null
   }
 }
 
-function onKeyDown(e: KeyboardEvent) {
-  if (e.key === ' ') {
-    e.preventDefault()
-    onPointerDown()
-  }
-  if (status.value !== 'playing') return
-
-  const step = 24
-  if (e.key === 'ArrowLeft') basketX -= step
-  if (e.key === 'ArrowRight') basketX += step
+function onPointerCancel(e: PointerEvent) {
+  onPointerUp(e)
 }
 
 function toggleMute() {
@@ -463,19 +755,26 @@ function toggleMute() {
   ensureAudio()
 }
 
+function onStartButton() {
+  ensureAudio()
+  if (status.value === 'ready') startGame()
+  else if (status.value === 'gameover') {
+    resetGame()
+    startGame()
+  }
+}
+
 onMounted(() => {
   resetGame()
   resizeCanvas()
   ensureLoopRunning()
 
   window.addEventListener('resize', resizeCanvas)
-  window.addEventListener('keydown', onKeyDown)
 })
 
 onBeforeUnmount(() => {
   stopLoop()
   window.removeEventListener('resize', resizeCanvas)
-  window.removeEventListener('keydown', onKeyDown)
 
   try {
     audioCtx?.close()
@@ -494,6 +793,8 @@ onBeforeUnmount(() => {
         <v-chip size="small" variant="tonal" color="primary">Lives: {{ lives }}</v-chip>
         <v-chip size="small" variant="tonal" color="primary">Time: {{ Math.ceil(timeLeft) }}s</v-chip>
         <v-chip size="small" variant="tonal" color="primary">Combo: {{ combo }}</v-chip>
+        <v-chip v-if="magnetOn" size="small" variant="tonal" color="info">Magnet {{ Math.ceil(magnetLeft) }}s</v-chip>
+        <v-chip v-if="stickyOn" size="small" variant="tonal" color="deep-purple">Sticky {{ Math.ceil(stickyLeft) }}s</v-chip>
       </div>
 
       <div class="d-flex align-center ga-2">
@@ -503,7 +804,7 @@ onBeforeUnmount(() => {
           color="primary"
           variant="flat"
           :disabled="status === 'playing'"
-          @click="onPointerDown"
+          @click="onStartButton"
         >
           {{ status === 'gameover' ? 'Restart' : 'Start' }}
         </v-btn>
@@ -514,12 +815,14 @@ onBeforeUnmount(() => {
       ref="canvasRef"
       class="star-catcher-canvas"
       tabindex="0"
-      @pointermove="onPointerMove"
       @pointerdown="onPointerDown"
+      @pointermove="onPointerMove"
+      @pointerup="onPointerUp"
+      @pointercancel="onPointerCancel"
     />
 
     <div class="text-caption text-medium-emphasis mt-3" style="max-width: 920px">
-      操作：滑鼠/觸控左右移動接星星。鍵盤：← →，空白鍵開始/重開。
+      操作：點小星星會消除；大星星可長按（可分段）磨到變小消失。磁鐵 Buff 會更好點；黏黏 Debuff 會讓大星更難磨。
     </div>
   </div>
 </template>

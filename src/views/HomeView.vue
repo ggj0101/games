@@ -30,7 +30,7 @@ const games = computed<Game[]>(() => [
   {
     key: 'star-catcher',
     title: '星星接接樂（Star Catcher）',
-    description: '接住掉下來的星星！越到後面越快。',
+    description: '手機 Touch：點小星星消除；長按大星（可分段）磨到變小消失，固定 60 秒比總分。',
     to: '/star-catcher',
     status: 'ready'
   }
