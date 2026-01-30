@@ -495,7 +495,13 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number) {
     // highlight
     ctx.fillStyle = 'rgba(255,255,255,0.8)'
     ctx.beginPath()
-    ctx.arc(s.x - s.r * 0.3, s.y - s.r * 0.3, Math.max(1.5, s.r * 0.22), 0, Math.PI * 2)
+    ctx.arc(
+      s.x - s.r * 0.3,
+      s.y - s.r * 0.3,
+      Math.max(1.5, s.r * 0.22),
+      0,
+      Math.PI * 2
+    )
     ctx.fill()
 
     // big star progress ring
@@ -528,7 +534,13 @@ function render(ctx: CanvasRenderingContext2D, w: number, h: number) {
   }
 }
 
-function drawCenterText(ctx: CanvasRenderingContext2D, w: number, h: number, title: string, subtitle: string) {
+function drawCenterText(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  title: string,
+  subtitle: string
+) {
   ctx.save()
   ctx.fillStyle = 'rgba(0,0,0,0.45)'
   ctx.fillRect(0, h / 2 - 58, w, 116)
@@ -684,6 +696,9 @@ function clientToCanvasXY(clientX: number, clientY: number) {
 }
 
 function onPointerDown(e: PointerEvent) {
+  // Prevent long-press selection / callout on mobile.
+  e.preventDefault()
+
   // first user gesture → enable audio on iOS
   ensureAudio()
 
@@ -732,12 +747,14 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  e.preventDefault()
   const { x, y } = clientToCanvasXY(e.clientX, e.clientY)
   pointerX = x
   pointerY = y
 }
 
 function onPointerUp(e: PointerEvent) {
+  e.preventDefault()
   pointerDown = false
   if (activePointerId === e.pointerId) {
     activePointerId = null
@@ -786,7 +803,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="d-flex flex-column align-center" ref="wrapperRef">
+  <div class="star-catcher-root d-flex flex-column align-center" ref="wrapperRef">
     <div class="d-flex align-center justify-space-between w-100 mb-3" style="max-width: 920px">
       <div class="d-flex align-center ga-2 flex-wrap">
         <v-chip size="small" variant="tonal" color="primary">Score: {{ score }}</v-chip>
@@ -815,10 +832,10 @@ onBeforeUnmount(() => {
       ref="canvasRef"
       class="star-catcher-canvas"
       tabindex="0"
-      @pointerdown="onPointerDown"
-      @pointermove="onPointerMove"
-      @pointerup="onPointerUp"
-      @pointercancel="onPointerCancel"
+      @pointerdown.prevent="onPointerDown"
+      @pointermove.prevent="onPointerMove"
+      @pointerup.prevent="onPointerUp"
+      @pointercancel.prevent="onPointerCancel"
     />
 
     <div class="text-caption text-medium-emphasis mt-3" style="max-width: 920px">
@@ -828,8 +845,17 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.star-catcher-root {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .star-catcher-canvas {
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
   border-radius: 14px;
   outline: none;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
