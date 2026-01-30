@@ -484,6 +484,7 @@ onBeforeUnmount(() => {
             <PixiRadarOverlay
               :blips="radarBlips"
               :range-meters="range.rangeMeters"
+              :nearest-id="nearest?.t?.name ?? null"
               :sweep-speed="0.45"
               :audio-armed="audioArmed"
             />
