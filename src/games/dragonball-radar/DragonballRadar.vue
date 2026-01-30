@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PixiRadarOverlay from './PixiRadarOverlay.vue'
 
 import type { LatLng } from './geo'
@@ -132,8 +132,13 @@ const range = computed(() => {
 
 // --- Google Maps embed (optional background) ---
 const showMap = ref<boolean>(true)
+
+// Leaflet map (OSM tiles) — smooth pan without iframe reload
 const mapCenter = ref<LatLng>({ lat: targets[0]!.lat, lng: targets[0]!.lng })
 const mapZoom = ref<number>(15)
+const leafletRef = ref<HTMLDivElement | null>(null)
+let map: any = null
+let tileLayer: any = null
 
 function round(n: number, digits: number) {
   const k = 10 ** digits
@@ -158,13 +163,59 @@ function updateMapView(force = false) {
     mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
     mapZoom.value = nextZoom
     lastMapUpdateAt = now
+
+    // Leaflet smooth pan (no iframe reload / flashing)
+    if (showMap.value && map) {
+      const latlng = [mapCenter.value.lat, mapCenter.value.lng]
+
+      // Big jumps or forced recenter should snap; normal updates should animate.
+      const bigJump = moved > 120
+      if (force || bigJump) {
+        map.setView(latlng, mapZoom.value, { animate: false })
+      } else {
+        map.setZoom(mapZoom.value, { animate: true })
+        map.panTo(latlng, { animate: true, duration: 0.6 })
+      }
+    }
   }
 }
 
-const mapUrl = computed(() => {
-  // No-key embed. Use ll= to avoid pin markers.
-  return `https://www.google.com/maps?ll=${mapCenter.value.lat},${mapCenter.value.lng}&z=${mapZoom.value}&output=embed`
-})
+// (removed) legacy stub
+
+async function initLeaflet() {
+  if (!leafletRef.value) return
+  if (map) return
+
+  const L = await import('leaflet')
+
+  map = L.map(leafletRef.value, {
+    zoomControl: false,
+    attributionControl: true,
+    inertia: true,
+    worldCopyJump: true
+  })
+
+  tileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map)
+
+  map.setView([mapCenter.value.lat, mapCenter.value.lng], mapZoom.value, { animate: false })
+
+  // Apply initial opacity.
+  const el = tileLayer.getContainer?.()
+  if (el) el.style.opacity = String(mapOpacity.value)
+}
+
+function destroyLeaflet() {
+  try {
+    map?.remove()
+  } catch {
+    // ignore
+  }
+  map = null
+  tileLayer = null
+}
 
 // --- Pixi radar overlay data ---
 const radarBlips = computed(() => {
@@ -438,8 +489,10 @@ onMounted(() => {
   loadFound()
   loadOpacity()
 
-  // Initialize map center/zoom once (won't auto-reload frequently).
-  if (showMap.value) updateMapView(true)
+  // Init Leaflet map once.
+  if (showMap.value) {
+    void initLeaflet().then(() => updateMapView(true))
+  }
 
   // Start rotation smoothing loop (compass permission may still require user gesture).
   if (rafId == null) rafId = requestAnimationFrame(tick)
@@ -448,9 +501,27 @@ onMounted(() => {
   if (allFound.value) status.value = 'success'
 })
 
+watch(showMap, (v) => {
+  if (v) {
+    void initLeaflet().then(() => updateMapView(true))
+  } else {
+    destroyLeaflet()
+  }
+})
+
+watch(mapOpacity, (v) => {
+  try {
+    const el = tileLayer?.getContainer?.()
+    if (el) el.style.opacity = String(v)
+  } catch {
+    // ignore
+  }
+})
+
 onBeforeUnmount(() => {
   stopWatch()
   stopCompass()
+  destroyLeaflet()
   if (rafId != null) cancelAnimationFrame(rafId)
 })
 </script>
@@ -471,23 +542,18 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="d-flex justify-center">
-        <div class="radar-stack">
+        <div class="radar-stack" :style="{ '--map-opacity': String(mapOpacity) }">
+          <!-- Bottom layer: Leaflet map (smooth pan, no iframe flicker) -->
+          <div v-if="showMap" ref="leafletRef" class="map-leaflet" />
+
+          <!-- Top layer: radar overlay; rotate overlay only in heading-up mode -->
           <div
-            class="radar-stack"
-            :class="{ 'heading-up': alignMode === 'heading-up' }"
+            class="overlay-rot"
             :style="{
               ...(alignMode === 'heading-up' ? { transform: `rotate(${mapRotationDeg}deg)` } : {}),
-              '--map-opacity': String(mapOpacity),
-              '--hud-opacity': String(hudOpacity)
+              opacity: String(hudOpacity)
             }"
           >
-            <iframe
-              v-if="showMap"
-              class="map-iframe"
-              :src="mapUrl"
-              loading="eager"
-              referrerpolicy="no-referrer-when-downgrade"
-            />
             <PixiRadarOverlay
               :blips="radarBlips"
               :range-meters="range.rangeMeters"
@@ -514,7 +580,7 @@ onBeforeUnmount(() => {
       <v-card variant="tonal" rounded="lg" class="mt-3 pa-3">
         <div class="text-subtitle-2 font-weight-bold mb-2">透明度</div>
 
-        <div class="text-caption text-medium-emphasis">Google Maps：{{ Math.round(mapOpacity * 100) }}%</div>
+        <div class="text-caption text-medium-emphasis">地圖（OSM）：{{ Math.round(mapOpacity * 100) }}%</div>
         <v-slider
           v-model="mapOpacity"
           :min="0"
@@ -676,21 +742,22 @@ onBeforeUnmount(() => {
 :root {
   /* You can tune these to taste. */
   --map-opacity: 1;
-  --hud-opacity: 0.6;
 }
 
-.map-iframe {
+.map-leaflet {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
   z-index: 0;
   opacity: var(--map-opacity);
-  pointer-events: none;
 }
 
-/* Pixi overlay uses absolute mount with z-index:1 */
+.overlay-rot {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  transform-origin: center center;
+  pointer-events: none;
+}
 
 .dot {
   width: 10px;
