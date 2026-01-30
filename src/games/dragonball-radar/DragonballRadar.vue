@@ -139,6 +139,7 @@ const mapZoom = ref<number>(15)
 const leafletRef = ref<HTMLDivElement | null>(null)
 let map: any = null
 let tileLayer: any = null
+let userMarker: any = null
 
 function round(n: number, digits: number) {
   const k = 10 ** digits
@@ -167,6 +168,12 @@ function updateMapView(force = false) {
     // Leaflet smooth pan (no iframe reload / flashing)
     if (showMap.value && map) {
       const latlng = [mapCenter.value.lat, mapCenter.value.lng]
+
+      try {
+        userMarker?.setLatLng?.(latlng)
+      } catch {
+        // ignore
+      }
 
       // Big jumps or forced recenter should snap; normal updates should animate.
       const bigJump = moved > 120
@@ -200,11 +207,29 @@ async function initLeaflet() {
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map)
 
+  // User marker (a small dot). We'll update it on each GPS fix.
+  userMarker = L.circleMarker([mapCenter.value.lat, mapCenter.value.lng], {
+    radius: 6,
+    weight: 2,
+    color: '#00ff99',
+    fillColor: '#00ff99',
+    fillOpacity: 0.75
+  }).addTo(map)
+
   map.setView([mapCenter.value.lat, mapCenter.value.lng], mapZoom.value, { animate: false })
 
   // Apply initial opacity.
   const el = tileLayer.getContainer?.()
   if (el) el.style.opacity = String(mapOpacity.value)
+
+  // Leaflet sometimes needs a size invalidation after mount/visibility changes.
+  setTimeout(() => {
+    try {
+      map?.invalidateSize?.()
+    } catch {
+      // ignore
+    }
+  }, 0)
 }
 
 function destroyLeaflet() {
@@ -215,6 +240,7 @@ function destroyLeaflet() {
   }
   map = null
   tileLayer = null
+  userMarker = null
 }
 
 // --- Pixi radar overlay data ---
@@ -546,6 +572,9 @@ onBeforeUnmount(() => {
           <!-- Bottom layer: Leaflet map (smooth pan, no iframe flicker) -->
           <div v-if="showMap" ref="leafletRef" class="map-leaflet" />
 
+          <!-- Center reticle (makes it obvious the map is panning) -->
+          <div v-if="showMap" class="center-reticle" />
+
           <!-- Top layer: radar overlay; rotate overlay only in heading-up mode -->
           <div
             class="overlay-rot"
@@ -751,10 +780,42 @@ onBeforeUnmount(() => {
   opacity: var(--map-opacity);
 }
 
-.overlay-rot {
+.center-reticle {
   position: absolute;
   inset: 0;
   z-index: 1;
+  pointer-events: none;
+}
+
+.center-reticle::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  border: 2px solid rgba(124, 255, 190, 0.9);
+  box-shadow: 0 0 18px rgba(124, 255, 190, 0.35);
+}
+
+.center-reticle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  background: rgba(124, 255, 190, 0.65);
+  box-shadow: 0 0 12px rgba(124, 255, 190, 0.25);
+}
+
+.overlay-rot {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   transform-origin: center center;
   pointer-events: none;
 }
