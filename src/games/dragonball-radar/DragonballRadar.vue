@@ -140,17 +140,24 @@ function round(n: number, digits: number) {
   return Math.round(n * k) / k
 }
 
+let lastMapUpdateAt = 0
+
 function updateMapView(force = false) {
   const center = userPos.value ?? nearest.value?.t
   if (!center) return
 
   const moved = haversineMeters(mapCenter.value, center)
   const nextZoom = range.value.mapZoom
+  const now = Date.now()
 
-  // Only update when it would matter; reduces iframe reload / flashing.
-  if (force || moved > 50 || nextZoom !== mapZoom.value) {
+  // Follow-mode behavior: keep the map feeling "alive" while you walk.
+  // - Update when moved > ~10m
+  // - Or at least every 5s (prevents "stuck" feeling during slow movement)
+  // - Still update on zoom changes
+  if (force || moved > 10 || now - lastMapUpdateAt > 5000 || nextZoom !== mapZoom.value) {
     mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
     mapZoom.value = nextZoom
+    lastMapUpdateAt = now
   }
 }
 
