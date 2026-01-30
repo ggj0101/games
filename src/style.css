@@ -4,6 +4,28 @@ body {
   margin: 0;
 }
 
+/*
+  Game UX: disable accidental text selection / long-press callout on mobile.
+  If you need selectable text in a specific area, override with:
+  user-select: text;
+*/
+body {
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+a,
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
 #app {
   height: 100%;
 }

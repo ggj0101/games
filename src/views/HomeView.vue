@@ -42,32 +42,79 @@ function go(to: string) {
 </script>
 
 <template>
-  <v-container class="py-8">
-    <v-row align="center" class="mb-4">
+  <v-container class="home py-8">
+    <v-row class="mb-5" align="center" justify="space-between">
       <v-col cols="12" md="8">
-        <h1 class="text-h4 font-weight-bold">Game Select</h1>
-        <p class="text-body-1 text-medium-emphasis">
-          選擇一個遊戲開始。
-        </p>
+        <div class="text-overline text-medium-emphasis">GAMES</div>
+        <h1 class="text-h4 font-weight-bold mb-2">選擇遊戲</h1>
+        <div class="text-body-2 text-medium-emphasis">
+          手機遊玩建議：直接點按操作，避免長按選取文字。
+        </div>
       </v-col>
     </v-row>
 
     <v-row>
       <v-col v-for="g in games" :key="g.key" cols="12" sm="6" md="4">
-        <v-card rounded="lg" variant="tonal" class="h-100">
-          <v-card-title class="text-h6">{{ g.title }}</v-card-title>
-          <v-card-text class="text-body-2">{{ g.description }}</v-card-text>
-          <v-card-actions>
+        <v-card
+          class="game-tile h-100"
+          rounded="xl"
+          variant="tonal"
+          :disabled="g.status !== 'ready'"
+          @click="g.status === 'ready' && go(g.to)"
+        >
+          <v-card-item>
+            <div class="d-flex align-center justify-space-between">
+              <div class="text-h6 font-weight-bold">
+                {{ g.title }}
+              </div>
+              <v-chip
+                size="small"
+                variant="flat"
+                :color="g.status === 'ready' ? 'green' : 'grey'"
+              >
+                {{ g.status === 'ready' ? 'READY' : 'SOON' }}
+              </v-chip>
+            </div>
+          </v-card-item>
+
+          <v-card-text class="text-body-2 text-medium-emphasis">
+            {{ g.description }}
+          </v-card-text>
+
+          <v-card-actions class="px-4 pb-4">
             <v-btn
               color="primary"
+              variant="flat"
               :disabled="g.status !== 'ready'"
-              @click="go(g.to)"
+              @click.stop="go(g.to)"
             >
               Play
             </v-btn>
+            <v-spacer />
+            <div class="text-caption text-medium-emphasis">Tap to open</div>
           </v-card-actions>
         </v-card>
       </v-col>
     </v-row>
   </v-container>
 </template>
+
+<style scoped>
+.home {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.game-tile {
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.game-tile:hover {
+  transform: translateY(-2px);
+}
+
+.game-tile:active {
+  transform: translateY(0px) scale(0.99);
+}
+</style>
