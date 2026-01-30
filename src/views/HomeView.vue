@@ -33,6 +33,13 @@ const games = computed<Game[]>(() => [
     description: '手機 Touch：點小星星消除；長按大星（可分段）磨到變小消失，固定 60 秒比總分。',
     to: '/star-catcher',
     status: 'ready'
+  },
+  {
+    key: 'tomato-timer',
+    title: '番茄鐘（規劃中）',
+    description: '規劃中的番茄鐘小遊戲：專注/休息節奏 + 音效 + 小成就。',
+    to: '/tomato-timer',
+    status: 'coming-soon'
   }
 ])
 
