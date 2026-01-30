@@ -35,6 +35,13 @@ const games = computed<Game[]>(() => [
     status: 'ready'
   },
   {
+    key: 'jelly-match',
+    title: '果凍配對（Jelly Match）',
+    description: '點指定顏色的果凍得分；點錯扣生命。45 秒內挑戰連擊！',
+    to: '/jelly-match',
+    status: 'ready'
+  },
+  {
     key: 'tomato-timer',
     title: '番茄鐘（規劃中）',
     description: '規劃中的番茄鐘小遊戲：專注/休息節奏 + 音效 + 小成就。',
