@@ -146,43 +146,60 @@ function round(n: number, digits: number) {
   return Math.round(n * k) / k
 }
 
+// Map follow tuning (so it *feels* like it follows you, not "stuck")
+const followEnabled = ref<boolean>(true)
+const followThresholdMeters = ref<number>(5)
+const followMinIntervalMs = ref<number>(1500)
+
+// Optional: keep map zoom closer so movement is visually obvious,
+// without affecting radar range scaling.
+const mapFixedZoomEnabled = ref<boolean>(false)
+const mapFixedZoom = ref<number>(16)
+
 let lastMapUpdateAt = 0
+
+function desiredMapZoom() {
+  return mapFixedZoomEnabled.value ? mapFixedZoom.value : range.value.mapZoom
+}
 
 function updateMapView(force = false) {
   const center = userPos.value ?? nearest.value?.t
   if (!center) return
 
   const moved = haversineMeters(mapCenter.value, center)
-  const nextZoom = range.value.mapZoom
+  const nextZoom = desiredMapZoom()
   const now = Date.now()
 
-  // Follow-mode behavior: keep the map feeling "alive" while you walk.
-  // - Update when moved > ~10m
-  // - Or at least every 5s (prevents "stuck" feeling during slow movement)
-  // - Still update on zoom changes
-  if (force || moved > 10 || now - lastMapUpdateAt > 5000 || nextZoom !== mapZoom.value) {
-    mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
-    mapZoom.value = nextZoom
-    lastMapUpdateAt = now
+  const shouldFollow =
+    followEnabled.value &&
+    (force ||
+      moved > followThresholdMeters.value ||
+      now - lastMapUpdateAt > followMinIntervalMs.value ||
+      nextZoom !== mapZoom.value)
 
-    // Leaflet smooth pan (no iframe reload / flashing)
-    if (showMap.value && map) {
-      const latlng = [mapCenter.value.lat, mapCenter.value.lng]
+  if (!shouldFollow) return
 
-      try {
-        userMarker?.setLatLng?.(latlng)
-      } catch {
-        // ignore
-      }
+  mapCenter.value = { lat: round(center.lat, 5), lng: round(center.lng, 5) }
+  mapZoom.value = nextZoom
+  lastMapUpdateAt = now
 
-      // Big jumps or forced recenter should snap; normal updates should animate.
-      const bigJump = moved > 120
-      if (force || bigJump) {
-        map.setView(latlng, mapZoom.value, { animate: false })
-      } else {
-        map.setZoom(mapZoom.value, { animate: true })
-        map.panTo(latlng, { animate: true, duration: 0.6 })
-      }
+  // Leaflet smooth pan (no iframe reload / flashing)
+  if (showMap.value && map) {
+    const latlng = [mapCenter.value.lat, mapCenter.value.lng]
+
+    try {
+      userMarker?.setLatLng?.(latlng)
+    } catch {
+      // ignore
+    }
+
+    // Big jumps or forced recenter should snap; normal updates should animate.
+    const bigJump = moved > 120
+    if (force || bigJump) {
+      map.setView(latlng, mapZoom.value, { animate: false })
+    } else {
+      map.setZoom(mapZoom.value, { animate: true })
+      map.panTo(latlng, { animate: true, duration: 0.6 })
     }
   }
 }
@@ -605,6 +622,49 @@ onBeforeUnmount(() => {
           目前座標: {{ userPos.lat.toFixed(6) }}, {{ userPos.lng.toFixed(6) }}
         </v-chip>
       </div>
+
+      <v-card variant="tonal" rounded="lg" class="mt-3 pa-3">
+        <div class="text-subtitle-2 font-weight-bold mb-2">地圖跟隨</div>
+
+        <div class="text-caption text-medium-emphasis">跟隨：{{ followEnabled ? '開' : '關' }}</div>
+        <v-switch v-model="followEnabled" class="mt-1" inset />
+
+        <div class="text-caption text-medium-emphasis">敏感度（移動多少公尺才更新）：{{ followThresholdMeters }}m</div>
+        <v-slider
+          v-model="followThresholdMeters"
+          :min="1"
+          :max="20"
+          :step="1"
+          thumb-label
+          class="mt-1"
+        />
+
+        <div class="text-caption text-medium-emphasis">最短更新間隔：{{ followMinIntervalMs }}ms</div>
+        <v-slider
+          v-model="followMinIntervalMs"
+          :min="250"
+          :max="5000"
+          :step="250"
+          thumb-label
+          class="mt-1"
+        />
+
+        <div class="text-caption text-medium-emphasis">
+          固定底圖縮放（讓走路位移更有感）：{{ mapFixedZoomEnabled ? '開' : '關' }}
+        </div>
+        <v-switch v-model="mapFixedZoomEnabled" class="mt-1" inset />
+
+        <div v-if="mapFixedZoomEnabled" class="text-caption text-medium-emphasis">底圖 zoom：{{ mapFixedZoom }}</div>
+        <v-slider
+          v-if="mapFixedZoomEnabled"
+          v-model="mapFixedZoom"
+          :min="12"
+          :max="18"
+          :step="1"
+          thumb-label
+          class="mt-1"
+        />
+      </v-card>
 
       <v-card variant="tonal" rounded="lg" class="mt-3 pa-3">
         <div class="text-subtitle-2 font-weight-bold mb-2">透明度</div>
