@@ -42,6 +42,13 @@ const games = computed<Game[]>(() => [
     status: 'ready'
   },
   {
+    key: 'color-balloon-pop',
+    title: '彩色氣球爆爆樂（Color Balloon Pop）',
+    description: '只點「目標顏色」的氣球！點錯扣心，60 秒挑戰高分與連擊。',
+    to: '/color-balloon-pop',
+    status: 'ready'
+  },
+  {
     key: 'tomato-timer',
     title: '番茄鐘（規劃中）',
     description: '規劃中的番茄鐘小遊戲：專注/休息節奏 + 音效 + 小成就。',

@@ -5,6 +5,7 @@ import BreakoutView from '@/views/BreakoutView.vue'
 import DragonballRadarView from '@/views/DragonballRadarView.vue'
 import StarCatcherView from '@/views/StarCatcherView.vue'
 import JellyMatchView from '@/views/JellyMatchView.vue'
+import ColorBalloonPopView from '@/views/ColorBalloonPopView.vue'
 import TomatoTimerView from '@/views/TomatoTimerView.vue'
 
 const router = createRouter({
@@ -16,6 +17,7 @@ const router = createRouter({
     { path: '/dragonball-radar', name: 'dragonball-radar', component: DragonballRadarView },
     { path: '/star-catcher', name: 'star-catcher', component: StarCatcherView },
     { path: '/jelly-match', name: 'jelly-match', component: JellyMatchView },
+    { path: '/color-balloon-pop', name: 'color-balloon-pop', component: ColorBalloonPopView },
     { path: '/tomato-timer', name: 'tomato-timer', component: TomatoTimerView },
     {
       path: '/:pathMatch(.*)*',
