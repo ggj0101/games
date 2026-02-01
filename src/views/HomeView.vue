@@ -65,28 +65,6 @@ function gradientFor(key: string) {
             快速開始、手機優先、即點即玩。挑一個遊戲，現在就開局。
           </div>
 
-          <div class="d-flex flex-wrap ga-3">
-            <v-btn
-              color="primary"
-              variant="flat"
-              size="large"
-              prepend-icon="mdi-rocket-launch"
-              :to="featured?.to"
-              :disabled="!featured"
-            >
-              {{ featured ? `Play ${featured.title}` : 'No games yet' }}
-            </v-btn>
-
-            <v-btn
-              variant="tonal"
-              size="large"
-              prepend-icon="mdi-magnify"
-              @click="query = ''"
-            >
-              Browse
-            </v-btn>
-          </div>
-
           <div class="mt-6 text-caption text-medium-emphasis">
             提示：行動裝置建議直覺點按操作；已全站禁用長按選取文字。
           </div>
